@@ -1,0 +1,32 @@
+{
+  "name": "kingdoms-beneath",
+  "description": "Petit jeu de survie / craft 2D",
+  "license": "MIT",
+  "homepage": "https://davidzoon.github.io/kingdoms-beneath/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DavidZoon/kingdoms-beneath.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DavidZoon/kingdoms-beneath/issues"
+  },
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node run-tool.mjs vite",
+    "typecheck": "tsc --noEmit",
+    "test": "node run-tool.mjs vitest run",
+    "build": "node run-tool.mjs vite build",
+    "preview": "node run-tool.mjs vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.0",
+    "vitest": "^4.0.0"
+  }
+}
