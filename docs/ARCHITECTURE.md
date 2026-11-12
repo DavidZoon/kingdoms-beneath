@@ -32,6 +32,8 @@ Les torches sont des blocs non solides persistés dans les éditions, et des res
 
 Autosauvegarde toutes les cinq secondes, sauvegarde en pause et avant retour au menu. Les erreurs sont affichées et une autosauvegarde échouée peut être relancée manuellement. Aucun temps de jeu n'est ajouté durant la pause ou la fermeture. Le snapshot reprend l'état de la dernière écriture réussie, pas des actions postérieures à celle-ci.
 
+Le jeu est une PWA installable depuis Chromium. `vite-plugin-pwa` génère `manifest.webmanifest` (`display: fullscreen` avec repli `standalone`, `orientation: any`, `start_url` et `scope` alignés sur la base Vite) et un service worker Workbox qui précache tout le build : HTML, bundle Phaser, CSS, icônes et images. Le jeu fonctionne donc hors ligne après le premier chargement; les sauvegardes restent dans IndexedDB, hors du cache. Les icônes de `public/icons/` sont produites par `scripts/generate-icons.mjs`, qui agrandit la pioche 32×32 sans lissage. Le module `src/pwa/` reste indépendant du domaine : `registerPwa` enregistre le service worker en mode `prompt` (vérification horaire); `Application` affiche alors une bannière, sauvegarde la partie active, puis active la nouvelle version et recharge. `InstallPrompt` conserve l'événement `beforeinstallprompt` pour le bouton **Installer l'application**. `orientation` mémorise dans `localStorage` un choix propre à l'appareil (automatique, paysage ou portrait) et l'applique avec `screen.orientation.lock`, au démarrage et à chaque entrée en plein écran. Si le navigateur refuse, le jeu suit l'orientation de l'appareil et `Phaser.Scale.RESIZE` adapte le canvas.
+
 Le reste de ce document décrit l'architecture cible : sauvegardes multiples, copie de récupération, migrations entre futurs schémas, commandes PNJ, stations d'artisanat et combat ne sont pas encore implémentés.
 
 ## Principes
@@ -82,6 +84,7 @@ src/
 ├── save/                 # schémas, migrations, repositories IndexedDB
 ├── input/                # clavier, souris, tactile, mapping configurable
 ├── ui/                   # HUD, menus et overlays accessibles
+├── pwa/                  # service worker, installation, orientation
 ├── scenes/               # adaptateurs/scènes Phaser minces
 ├── assets/               # code de références/chargement d’assets
 └── config/               # catalogues et paramètres typés
@@ -94,7 +97,7 @@ docs/
 └── ...
 ```
 
-Les tranches actuelles instancient `game`, `world`, `generation`, `player`, `inventory`, `lighting`, `rendering`, `input`, `save`, `ui` et `scenes`; créer les autres domaines au fur et à mesure qu'un incrément les utilise. Les ressources originales placées dans `assets/` relèvent de la licence CC BY-NC-SA 4.0; leurs éventuelles copies servies conservent cette licence et leurs mentions d'attribution. Le code et la documentation sont sous MIT; les composants tiers gardent leurs propres licences.
+Les tranches actuelles instancient `game`, `world`, `generation`, `player`, `inventory`, `lighting`, `rendering`, `input`, `save`, `ui`, `pwa` et `scenes`; créer les autres domaines au fur et à mesure qu'un incrément les utilise. Les ressources originales placées dans `assets/` relèvent de la licence CC BY-NC-SA 4.0; leurs éventuelles copies servies conservent cette licence et leurs mentions d'attribution. Le code et la documentation sont sous MIT; les composants tiers gardent leurs propres licences.
 
 ## Responsabilités principales
 

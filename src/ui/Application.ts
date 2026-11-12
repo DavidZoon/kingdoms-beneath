@@ -14,6 +14,12 @@ import {
 import { dayPhaseAt } from "../lighting/WorldClock";
 import { isLightingQuality } from "../lighting/quality";
 import { hudCameraCenter } from "../rendering/camera";
+import { InstallPrompt, isRunningAsApp } from "../pwa/installPrompt";
+import {
+  applyOrientation, isOrientationPreference, readOrientationPreference, writeOrientationPreference,
+  type OrientationPreference,
+} from "../pwa/orientation";
+import { registerPwa } from "../pwa/registerPwa";
 
 type SlotLocation = { area: "inventory" | "hotbar"; index: number };
 type StackSource = SlotLocation & { stack: ItemStack };
@@ -35,6 +41,16 @@ function stackDescription(stack: ItemStack): string {
   return isToolStack(stack)
     ? `${ITEM_LABELS[stack.itemId]}, outil, durabilité ${stack.durability} / ${TOOLS[stack.itemId].maxDurability}`
     : `${ITEM_LABELS[stack.itemId]}, ${stack.quantity}, rotation ${stack.rotation ?? 0}°`;
+}
+
+function orientationSelect(id: string): string {
+  return `<label class="lighting-option" for="${id}">Orientation de l'écran
+    <select id="${id}" class="orientation-select">
+      <option value="auto">Automatique (suit l'appareil)</option>
+      <option value="landscape">Paysage verrouillé</option>
+      <option value="portrait">Portrait verrouillé</option>
+    </select>
+  </label>`;
 }
 
 function hotbarMarkup(id: string): string {
@@ -80,6 +96,8 @@ export class Application {
   private lastCraft: { recipeId: RecipeId; quantity: number } | null = null;
   private finishedCraft: { recipeId: RecipeId; quantity: number } | null = null;
   private wasCraftBlocked = false;
+  private readonly installPrompt: InstallPrompt;
+  private reloadForUpdate: (() => Promise<void>) | null = null;
 
   constructor(private readonly gameParent: HTMLElement) {
     this.root.id = "app-ui";
@@ -105,6 +123,7 @@ export class Application {
                 <button id="import-save" data-operation>Importer un fichier</button>
                 <button id="export-save" data-operation>Exporter la sauvegarde</button>
               </div>
+              <button id="install-app" type="button" hidden>Installer l'application</button>
             </div>
             <form id="new-game-form" class="new-game-form" hidden>
               <h3>Fonder une colonie</h3>
@@ -121,6 +140,7 @@ export class Application {
                 <button id="cancel-new" type="button" data-operation>Annuler</button>
               </div>
             </form>
+            ${orientationSelect("orientation-menu")}
             <p id="menu-notice" class="notice" role="status"></p>
             <p class="storage-note">Un emplacement local · Sauvegarde automatique · Fichiers JSON<br>
               Vos parties restent sur cet appareil. Exportez-les pour les conserver ailleurs.</p>
@@ -238,6 +258,11 @@ export class Application {
             <p>Le mode économique réduit le coût du rendu sans modifier l'occlusion.</p>
             <p id="lighting-notice" class="notice" role="status"></p>
           </fieldset>
+          <fieldset class="game-options">
+            <legend>Affichage de cet appareil</legend>
+            ${orientationSelect("orientation-pause")}
+            <p id="orientation-notice" class="notice" role="status"></p>
+          </fieldset>
           <div class="menu-actions">
             <button id="continue-game" class="primary" data-operation>Continuer à jouer</button>
             <button id="save-game" data-operation>Sauvegarder maintenant</button>
@@ -249,6 +274,13 @@ export class Application {
       <div id="error-panel" class="error-panel" role="alert" hidden>
         <strong>Opération impossible</strong><p id="error-message"></p>
         <div class="button-row"><button id="retry-operation">Réessayer</button><button id="dismiss-error">Fermer</button></div>
+      </div>
+      <div id="update-banner" class="update-banner" role="status" hidden>
+        <p>Nouvelle version disponible.</p>
+        <div class="button-row">
+          <button id="apply-update" class="primary" type="button">Recharger</button>
+          <button id="dismiss-update" type="button">Plus tard</button>
+        </div>
       </div>
       <input id="save-file" type="file" accept=".json,application/json" hidden>
     `;
@@ -265,6 +297,10 @@ export class Application {
       () => this.dropSelectedItem(),
     );
     this.bindEvents();
+    this.installPrompt = new InstallPrompt((available) => {
+      this.element("install-app").hidden = !available;
+    });
+    this.bindPwa();
     void this.run(() => this.loadMenu());
     window.setInterval(() => {
       if (this.session && !this.paused && !this.busy && !this.autosaveFailed) {
@@ -468,6 +504,71 @@ export class Application {
     this.bindSlotEvents();
   }
 
+  private bindPwa(): void {
+    this.element("install-app").addEventListener("click", () => {
+      void this.installPrompt.prompt().then((outcome) => {
+        if (outcome === "accepted") {
+          this.element("menu-notice").textContent = "Installation lancée : retrouvez Kingdoms Beneath parmi vos applications.";
+        }
+      }).catch((error: unknown) => console.error("Kingdoms Beneath: installation", error));
+    });
+
+    const preference = readOrientationPreference();
+    for (const select of this.root.querySelectorAll<HTMLSelectElement>(".orientation-select")) {
+      select.value = preference;
+      select.addEventListener("change", () => {
+        if (isOrientationPreference(select.value)) {
+          void this.setOrientation(select.value, select.id === "orientation-pause" ? "orientation-notice" : "menu-notice");
+        }
+      });
+    }
+    void applyOrientation(preference);
+    // Browsers drop orientation locks when leaving fullscreen; restore them when it is entered again.
+    document.addEventListener("fullscreenchange", () => {
+      if (document.fullscreenElement) void applyOrientation(readOrientationPreference());
+    });
+
+    this.element("apply-update").addEventListener("click", () => {
+      const reload = this.reloadForUpdate;
+      if (!reload) return;
+      void this.run(async () => {
+        if (this.session) await this.saveCurrent();
+        await reload();
+      });
+    });
+    this.element("dismiss-update").addEventListener("click", () => {
+      this.element("update-banner").hidden = true;
+    });
+    registerPwa({
+      onNeedRefresh: (reload) => {
+        this.reloadForUpdate = reload;
+        this.element("update-banner").hidden = false;
+      },
+      onOfflineReady: () => {
+        const notice = this.element("menu-notice");
+        if (!this.element("main-menu").hidden && !notice.textContent) {
+          notice.textContent = "Le jeu est prêt à fonctionner hors ligne.";
+        }
+      },
+    });
+  }
+
+  private async setOrientation(preference: OrientationPreference, noticeId: string): Promise<void> {
+    writeOrientationPreference(preference);
+    for (const select of this.root.querySelectorAll<HTMLSelectElement>(".orientation-select")) select.value = preference;
+    const applied = await applyOrientation(preference);
+    const notice = this.element(noticeId);
+    if (preference === "auto") {
+      notice.textContent = "L'affichage suit l'orientation de l'appareil.";
+    } else if (applied) {
+      notice.textContent = `Affichage verrouillé en ${preference === "landscape" ? "paysage" : "portrait"}.`;
+    } else {
+      notice.textContent = isRunningAsApp()
+        ? "Cet appareil ne permet pas de verrouiller l'orientation."
+        : "Verrouillage disponible dans l'application installée sur mobile. Votre choix y sera appliqué.";
+    }
+  }
+
   private async run(operation: () => Promise<void>): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -544,6 +645,7 @@ export class Application {
     this.element("craft-notice").textContent = "";
     this.element("transfer-notice").textContent = "";
     this.element("lighting-notice").textContent = "";
+    this.element("orientation-notice").textContent = "";
     this.inventoryRenderKey = "";
     this.clearTransfer();
     this.lastCraft = null;

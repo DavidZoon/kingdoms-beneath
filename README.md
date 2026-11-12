@@ -105,6 +105,16 @@ Une nouvelle partie commence avec 4 torches. Les anciennes parties peuvent utili
 
 Le cycle dure huit minutes de simulation à 60 ticks par seconde et reste en pause avec le jeu. Une torche éclaire dans un cercle de **10 blocs de rayon** : intensité de 100 % jusqu'à 7,5 blocs, puis décroissance linéaire jusqu'à 0 % à 10 blocs. Les murs opaques bloquent les rayons et les feuilles les atténuent. Sélectionner la torche dans la barre rapide active aussi une lumière centrée sur le personnage, qui suit ses déplacements et s'éteint dès qu'un autre objet est sélectionné. Les torches posées restent allumées indépendamment de la sélection. Le soleil diffuse aussi autour des ouvertures. Dans **Pause / menu → Options de la partie**, la qualité **Économique** simplifie le rendu sans changer l'occlusion. Elle est sélectionnée par défaut pour une nouvelle partie sur un appareil dont le pointeur principal est tactile; la qualité reste modifiable et sauvegardée. Le masque fonctionne également avec le rendu Canvas lorsqu'aucun WebGL n'est disponible.
 
+## Installer comme application
+
+Le jeu est une PWA. Dans Chrome, Edge ou un autre navigateur Chromium, utilisez le bouton **Installer l'application** du menu principal, ou l'icône d'installation de la barre d'adresse. L'application s'ouvre en plein écran.
+
+- **Hors ligne** : après un premier chargement en ligne, tout le jeu est mis en cache et reste jouable sans réseau. Les sauvegardes ne sont pas dans ce cache : elles restent dans IndexedDB.
+- **Mises à jour** : quand une nouvelle version est publiée, le message **Nouvelle version disponible** apparaît. **Recharger** sauvegarde d'abord la partie en cours; **Plus tard** garde la version actuelle jusqu'au prochain lancement.
+- **Orientation de l'écran** : dans le menu principal ou **Pause / menu → Affichage de cet appareil**, choisissez **Automatique** (l'affichage suit l'appareil), **Paysage verrouillé** ou **Portrait verrouillé**. Le choix est mémorisé sur l'appareil. Le verrouillage dépend du navigateur : il fonctionne dans l'application installée sur mobile Android, pas sur ordinateur ni dans un onglet classique.
+
+Pour tester l'installation en local, lancez `npm run build` puis `npm run preview` : le service worker n'est pas actif avec `npm run dev`. Les icônes de `public/icons/` sont générées depuis la pioche 32×32 avec `node scripts/generate-icons.mjs`.
+
 ## Sauvegardes locales
 
 Un emplacement IndexedDB est utilisé par navigateur/origine. Autosauvegarde toutes les cinq secondes pendant le jeu, sauvegarde manuelle en pause, et sauvegarde obligatoire avant le retour au menu.

@@ -201,6 +201,12 @@ h3 { font: 400 23px Georgia, serif; }
 .pause-card p { color: #b7c6ad; font-size: 14px; line-height: 1.6; }
 .error-panel { position: absolute; z-index: 40; top: 16px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 24px)); padding: 18px; border: 1px solid #cf8960; border-radius: 8px; background: #422d22; box-shadow: 0 12px 40px #0008; }
 .error-panel p { font-size: 13px; line-height: 1.5; }
+.update-banner {
+  position: absolute; z-index: 45; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: min(380px, calc(100% - 24px)); padding: 14px 16px; pointer-events: auto;
+  border: 1px solid #d3b473; border-radius: 8px; background: #1b3127; box-shadow: 0 12px 40px #0008;
+}
+.update-banner p { margin: 0 0 10px; font-size: 14px; }
 .confirm-dialog { width: min(440px, calc(100% - 30px)); border: 1px solid #a4b581; border-radius: 10px; padding: 24px; background: #1b3127; color: #e9ebd9; }
 .confirm-dialog::backdrop { background: #06140ed9; }
 .confirm-dialog p { line-height: 1.6; font-size: 14px; color: #c2cdb4; }
