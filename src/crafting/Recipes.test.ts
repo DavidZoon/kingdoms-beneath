@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../game/GameSession";
 import { parseSave, serializeSave } from "../save/schema";
-import { MAX_CRAFT_QUANTITY, RECIPES, requiredMaterials, type RecipeId } from "./Recipes";
+import type { BlockItemId } from "../world/blocks";
+import { clampCraftQuantity, MAX_CRAFT_QUANTITY, RECIPES, requiredMaterials, type RecipeId } from "./Recipes";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
 
@@ -202,5 +203,37 @@ describe("progressive crafting", () => {
   it("assigns longer per-item durations to more complex recipes", () => {
     const order: RecipeId[] = ["torch", "ladder", "woodStairs", "stoneStairs"];
     expect(order.map((id) => RECIPES[id].ticksPerItem)).toEqual([60, 90, 120, 180]);
+  });
+});
+
+describe("craft quantity selection", () => {
+  it("caps a selection using ingredients from both the bag and shortcuts", () => {
+    const session = GameSession.create("Test", "craft-selection", 1000);
+    session.hotbar.fill(null);
+    session.inventory.wood = 3;
+    session.hotbar[7] = { itemId: "wood", quantity: 2 };
+    const available = (itemId: BlockItemId): number => session.totalItems(itemId);
+    expect(clampCraftQuantity(RECIPES.torch, 99, available)).toBe(10);
+    expect(clampCraftQuantity(RECIPES.torch, 4, available)).toBe(4);
+    session.inventory.wood = 0;
+    expect(clampCraftQuantity(RECIPES.torch, 10, available)).toBe(4);
+  });
+
+  it("uses the limiting ingredient of a multi-material recipe", () => {
+    const available = { wood: 12, stone: 3 };
+    expect(clampCraftQuantity(RECIPES.stonePickaxe, 99, (itemId) =>
+      itemId === "wood" ? available.wood : itemId === "stone" ? available.stone : 0)).toBe(3);
+  });
+
+  it("limits the slider to 99 objects while preserving full recipe batches", () => {
+    expect(clampCraftQuantity(RECIPES.ladder, 200, () => 1000)).toBe(99);
+    expect(clampCraftQuantity(RECIPES.torch, 99, () => 1000)).toBe(98);
+    expect(clampCraftQuantity(RECIPES.torch, 3, () => 1000)).toBe(2);
+    expect(clampCraftQuantity(RECIPES.torch, 1, () => 1000)).toBe(2);
+  });
+
+  it("returns zero when no full recipe can be made", () => {
+    expect(clampCraftQuantity(RECIPES.torch, 2, () => 0)).toBe(0);
+    expect(clampCraftQuantity(RECIPES.stonePickaxe, 5, (itemId) => itemId === "wood" ? 5 : 0)).toBe(0);
   });
 });

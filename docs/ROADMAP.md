@@ -1,5 +1,10 @@
 # Kingdoms Beneath — backlog et roadmap
 
+Le menu d'accueil propose **Roadmap et nouveautés** : une synthèse en frise de ces jalons et les
+12 derniers commits au maximum, intégrés au build pour rester consultables hors ligne.
+La synthèse et ses statuts sont maintenus dans `src/ui/roadmap.ts` et doivent suivre les évolutions de ce document.
+Les commits sont extraits automatiquement de Git ; ils ne comprennent pas les modifications non commitées.
+
 ## Vision cible
 
 Un jeu de profil entièrement en **2D**, avec physique 2D et monde en blocs modifiable. La direction artistique vise des tuiles pixel art natives de **32 × 32 pixels**, une surface et des grottes détaillées, des décors en parallaxe, un éclairage dynamique et des effets météo. Les références visuelles servent de direction artistique, pas de ressources à copier.

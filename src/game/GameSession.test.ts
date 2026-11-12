@@ -10,7 +10,10 @@ function flatSession(): GameSession {
   const session = GameSession.create("Test", "test", 1000);
   const ground = session.world.generator.surfaceAt(8);
   for (let x = 4; x <= 14; x++) {
-    for (let y = ground - 5; y < ground; y++) session.world.setBlock(x, y, Block.Air);
+    for (let y = ground - 5; y < ground; y++) {
+      session.world.setBlock(x, y, Block.Air);
+      if (session.world.getBackgroundOrigin(x, y) === "trunk") session.world.setBackground(x, y, Block.Air);
+    }
     session.world.setBlock(x, ground, Block.Dirt);
   }
   session.player.y = ground * TILE_SIZE - PLAYER_HEIGHT;

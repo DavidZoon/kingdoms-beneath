@@ -21,6 +21,13 @@ npm test
 npm run build
 ```
 
+Le bouton **Roadmap et nouveautés** de l'accueil ouvre une frise des étapes réalisées, en cours et à venir,
+ainsi que les 12 derniers commits au maximum. L'historique est intégré depuis le dépôt Git lors du démarrage
+de Vite ou du build : il reste disponible hors ligne et se renouvelle avec la prochaine version.
+Les modifications non commitées sont exclues ; les liens vers les commits et la roadmap détaillée nécessitent Internet.
+La fermeture est possible avec **Fermer** ou **Échap**. Sur téléphone, les deux frises s'affichent l'une sous l'autre.
+Le démarrage et le build nécessitent donc Git et un clone avec son historique.
+
 ### Sécurité des outils de développement
 
 Les commandes `npm run dev`, `npm test`, `npm run build` et `npm run preview` définissent
@@ -52,16 +59,17 @@ peut affecter d'autres projets. Les commandes npm de ce projet ne modifient pas 
 - L'action sur une case dépend du raccourci sélectionné : vide ou outil pour miner au clic gauche maintenu, matériau pour poser au clic gauche. Le minage donne son premier impact après 0,25 seconde, puis un impact toutes les 0,25 seconde. Les fissures grandissent depuis le centre du bloc.
 - Barre rapide de 10 piles, sélection via 1–9 et 0; inventaire (I) de 24 emplacements, piles de matériaux de 99 objets et outils individuels, dépôt (G) et ramassage à proximité.
 - Grottes déterministes, fonds de construction et troncs d'arbres en arrière-plan pour les nouveaux mondes du générateur v3. Les parties utilisant les générateurs v1 et v2 les conservent.
-- Paysage en parallaxe ancré au monde : sa hauteur ne se recale pas sur le terrain sous la caméra lors d'un saut ou d'un changement de niveau. Les plantes décoratives gardent aussi leur ancrage pendant le défilement.
+- Paysage en parallaxe ancré au monde : sa hauteur ne se recale pas sur le terrain sous la caméra lors d'un saut ou d'un changement de niveau. Les plantes décoratives gardent aussi leur ancrage pendant le défilement. Tous les décors restent derrière les blocs des deux plans, les objets déposés et le personnage.
 - Cycle jour/crépuscule/nuit/aube et torches dont la lumière est arrêtée ou atténuée par les matériaux. La lumière se met à jour quand le terrain change, y compris entre chunks.
 - Croix directionnelle en bas à gauche; boutons **Courrir** (maintien) et **Sauter** en bas à droite. Au tactile, maintenez directement une case pour miner avec un raccourci vide ou un outil, ou touchez-la pour poser le matériau sélectionné. Il n'y a plus de boutons Miner/Poser. Le pincement zoome sans déclencher d'action à son relâchement; changer de raccourci ou épuiser la pile interrompt le geste. Le joystick configurable reste prévu au MVP.
 - Pause avec Échap ou **Pause / menu**. La partie est aussi mise en pause lorsque l'onglet est masqué ou perd le focus.
+- Le bouton **?** affiche ou masque l'aide des commandes, masquée par défaut. Les commandes tactiles de déplacement, course et saut sont agrandies de 20 %.
 
 ### Durabilité et Mode créatif
 
 Chaque impact à mains nues retire 1 point de durabilité. Terre et herbe : 4 points; bois et escalier en bois : 6; pierre et escalier en pierre : 12; branches et échelles : 3; feuilles : 1. La roche-mère est indestructible. Les ressources ne sont récoltées qu'à la destruction complète. Relâcher le clic, changer de cible ou ouvrir un panneau interrompt le maintien : il faut à nouveau attendre 0,25 seconde, mais les dégâts déjà infligés restent sur le bloc. Ils survivent aussi au déchargement des chunks et à la sauvegarde. Un bloc replacé est neuf.
 
-Les torches ont 2 points de durabilité. La **Pioche en pierre**, dans la catégorie **Outils**, retire 2 points au bloc par impact, sur le plan choisi. Elle possède 500 points de durabilité et perd 1 point par coup réussi; elle se casse et disparaît après son dernier coup. Les cibles hors de portée, vides ou protégées ne l'usent pas. Les fonds naturels ordinaires restent indestructibles.
+Les torches ont 2 points de durabilité. La **Pioche en pierre**, dans la catégorie **Outils**, retire 2 points au bloc par impact. Comme les mains nues, elle mine automatiquement le premier plan, ou l'arrière-plan si aucun bloc n'occupe le premier plan à la case ciblée. Elle possède 500 points de durabilité et perd 1 point par coup réussi; elle se casse et disparaît après son dernier coup. Les cibles hors de portée, vides ou protégées ne l'usent pas. Les fonds naturels ordinaires restent indestructibles.
 
 Les outils ne sont ni empilables ni posables comme blocs; chaque exemplaire occupe un emplacement et garde sa propre durabilité pendant les transferts, dépôts au sol, ramassages et sauvegardes. Une barre sur son icône indique son état dans l'inventaire, les raccourcis, l'aperçu et au sol. L'icône de la pioche est un pixel art 32×32 à fond transparent, recréé d'après le dessin fourni. Les futures armes et pièces d'équipement pourront reprendre ce rangement individuel.
 
@@ -73,19 +81,25 @@ Ouvrez l'inventaire pour déplacer une pile entre ses 24 emplacements et les 10 
 
 Les objets empilables récoltés ou fabriqués remplissent d'abord les piles du même objet déjà présentes dans la barre de raccourcis, jusqu'à 99, puis l'inventaire. Les nouveaux outils occupent chacun un emplacement d'inventaire, sans modifier un outil déjà équipé. Aucun raccourci vide n'est rempli automatiquement. Si tout est plein, le butin reste au sol et la fabrication attend.
 
-Les deux flèches de rotation et le bouton de plan sont regroupés au-dessus de la barre, à côté d'un aperçu de l'objet sélectionné. Les flèches font pivoter la pièce de 90° vers la gauche ou la droite; l'aperçu et l'icône suivent l'orientation, appliquée à la pose et conservée dans la sauvegarde. Une sélection vide affiche des mains nues; la rotation est désactivée pour les mains et les outils. Une pioche peut choisir les deux plans. La géométrie des escaliers de premier plan suit leur rotation.
+Les vignettes du sac et des raccourcis dans l'inventaire ont la même taille que celles de la barre en jeu, y compris sur mobile. Inventaire ouvert, sélectionnez une pile du sac ou des raccourcis, puis utilisez **Déposer** ou **G** pour en déposer un objet : cette sélection est indépendante de l'objet équipé en jeu. Inventaire fermé, **G** dépose toujours l'objet équipé.
+
+Les icônes du sac, des raccourcis, de l'aperçu et des objets déposés utilisent le même dessin pixel art que les blocs en jeu. La pioche conserve son image dédiée.
+
+Les deux flèches de rotation et le bouton de plan sont regroupés au-dessus de la barre, à côté d'un aperçu de l'objet sélectionné. Les flèches font pivoter la pièce de 90° vers la gauche ou la droite; l'aperçu et l'icône suivent l'orientation, appliquée à la pose et conservée dans la sauvegarde. Une sélection vide affiche des mains nues; la rotation et le choix de plan sont désactivés pour les mains et les outils. La géométrie des escaliers de premier plan suit leur rotation.
 
 ### Deux plans de construction
 
-Le bouton à deux carrés au-dessus de la barre choisit le **premier plan** ou l'**arrière-plan** du raccourci sélectionné, même vide, à la souris, au tactile ou au clavier. L'aperçu d'un bloc en arrière-plan est assombri. Le choix reste associé au raccourci lorsque sa pile change ou s'épuise. Les torches et les échelles sont réservées au premier plan : leur bouton de plan est désactivé et, si une telle pile arrive dans un raccourci configuré en arrière-plan, celui-ci repasse automatiquement au premier plan.
+Le bouton à deux carrés au-dessus de la barre choisit le **premier plan** ou l'**arrière-plan** pour la pose d'un matériau du raccourci sélectionné, à la souris, au tactile ou au clavier. L'aperçu d'un bloc en arrière-plan est assombri. Le choix reste associé au raccourci lorsque sa pile change ou s'épuise, mais ne s'applique pas au minage. Les torches et les échelles sont réservées au premier plan : leur bouton de plan est désactivé et, si une telle pile arrive dans un raccourci configuré en arrière-plan, celui-ci repasse automatiquement au premier plan.
 
-La pose et le minage ciblent le plan choisi. Une nouvelle pièce doit toucher par un côté une pièce du même plan, ou disposer d'un bloc de l'autre plan à la même case; une diagonale ne suffit pas. Le support est vérifié à la pose, sans effondrement ultérieur. On peut construire en arrière-plan derrière le personnage, mais pas l'enfermer dans un bloc de premier plan. Ces règles s'appliquent aussi aux anciennes parties.
+La pose cible le plan choisi. Le minage cible toujours le premier plan s'il est occupé, sinon l'arrière-plan, indépendamment du choix enregistré dans le raccourci. Une nouvelle pièce doit toucher par un côté une pièce du même plan, ou disposer d'un bloc de l'autre plan à la même case; une diagonale ne suffit pas. Le support est vérifié à la pose, sans effondrement ultérieur. On peut construire en arrière-plan derrière le personnage, mais pas l'enfermer dans un bloc de premier plan. Ces règles s'appliquent aussi aux anciennes parties.
 
-Les blocs d'arrière-plan sont affichés à 70 % de leur couleur, suivent exactement la même caméra que le premier plan, ne bloquent pas les personnages et laissent passer la lumière. Dans les nouveaux mondes, le fond naturel sous la surface et dans les grottes est indestructible : le miner ne produit ni fissure ni message. Les troncs naturels font exception : ils restent à leur couleur normale et sont récoltables. Pour les miner, sélectionnez un **raccourci vide ou une pioche réglés sur l'arrière-plan**, puis maintenez le clic ou l'appui sur le tronc. Les blocs d'arrière-plan construits par le joueur sont eux aussi minables sur ce plan, même derrière un bloc de premier plan.
+Le minage suit un rayon du centre du personnage vers le centre de la case visée. Le premier bloc rencontré sur le même plan est miné à la place du bloc visé; les obstacles de l'autre plan et les fonds d'arrière-plan indestructibles sont ignorés. Le cadre de sélection indique le bloc réellement atteint. Une fois cet obstacle retiré, le maintien continue vers le bloc suivant, avec le délai habituel avant le prochain impact. La case visée doit rester dans la portée de cinq blocs.
+
+Les blocs d'arrière-plan sont affichés à 70 % de leur couleur, suivent exactement la même caméra que le premier plan, ne bloquent pas les personnages et laissent passer la lumière. Dans les nouveaux mondes, le fond naturel sous la surface et dans les grottes est indestructible : le miner ne produit ni fissure ni message. Les troncs naturels font exception : ils restent à leur couleur normale et sont récoltables. Pour les miner, sélectionnez un **raccourci vide ou une pioche**, puis maintenez le clic ou l'appui sur le tronc. Les troncs et les blocs d'arrière-plan construits par le joueur ne sont accessibles au minage qu'après avoir retiré le bloc de premier plan de la même case.
 
 ### Fabrication
 
-Le volet **Recettes connues** indique les matériaux et le temps par objet :
+Les recettes du volet **Recettes connues** utilisent les matériaux et temps suivants :
 
 | Recette | Matériaux | Temps par objet |
 |---|---|---|
@@ -95,7 +109,11 @@ Le volet **Recettes connues** indique les matériaux et le temps par objet :
 | 2 escaliers en pierre | 1 pierre | 3 s |
 | 1 pioche en pierre | 1 bois + 1 pierre | 3 s |
 
-La quantité désigne les objets produits et doit respecter le rendement de la recette : par exemple, les torches se fabriquent par multiples de deux. Le lot peut occuper plusieurs piles, dans la limite de l'inventaire et des places restantes dans les piles correspondantes des raccourcis. Les matériaux sont pris dans l'inventaire puis les raccourcis et réservés au démarrage, après vérification de la place nécessaire; une recette peut donc utiliser uniquement des matériaux de la barre. Les objets arrivent un par un, en priorité dans les piles existantes des raccourcis puis dans l'inventaire; deux barres montrent la progression de l'objet et celle du lot. Si ces espaces se remplissent entre-temps, la fabrication attend qu'une place soit libérée sans perdre les matériaux réservés. Un lot lancé ne peut pas encore être annulé. Il continue inventaire fermé, s'arrête en pause et reprend après sauvegarde et chargement, sans avancer pendant la fermeture du jeu.
+Le slider sélectionne le nombre d'objets à produire, de 1 à 99 pour les recettes unitaires, ou de 2 à 98 par pas de 2 pour les torches et les escaliers. La sélection est automatiquement ramenée au maximum fabricable avec les ressources du sac et des raccourcis; ce maximum est affiché à côté de la quantité sous la forme **Max 48**. Sans les ingrédients d'une recette complète, la quantité affichée est zéro et la fabrication est désactivée. Les lots déjà sauvegardés de plus de 99 objets continuent normalement.
+
+L'inventaire n'affiche plus le résumé des emplacements, les détails des ingrédients/temps ni les textes de progression : seules les deux barres restent visibles, avec des libellés accessibles aux lecteurs d'écran. Les avertissements de fabrication restent affichés.
+
+La quantité désigne les objets produits et doit respecter le rendement de la recette : par exemple, les torches se fabriquent par multiples de deux. Le lot doit tenir dans l'inventaire et les places restantes des piles correspondantes des raccourcis. Les matériaux sont pris dans l'inventaire puis les raccourcis et réservés au démarrage, après vérification de la place nécessaire; une recette peut donc utiliser uniquement des matériaux de la barre. Les objets arrivent un par un, en priorité dans les piles existantes des raccourcis puis dans l'inventaire; deux barres montrent la progression de l'objet et celle du lot. Si ces espaces se remplissent entre-temps, la fabrication attend qu'une place soit libérée sans perdre les matériaux réservés. Un lot lancé ne peut pas encore être annulé. Il continue inventaire fermé, s'arrête en pause et reprend après sauvegarde et chargement, sans avancer pendant la fermeture du jeu.
 
 Les escaliers de premier plan peuvent être posés, gravis et récupérés au minage. Dans leur orientation initiale, ils montent de gauche à droite; l'éclairage considère leur cellule comme opaque.
 

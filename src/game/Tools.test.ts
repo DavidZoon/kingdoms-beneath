@@ -13,7 +13,10 @@ function sessionWithTool(durability = 500): GameSession {
   const session = GameSession.create("Outils", "two-layers", 1000);
   const ground = session.world.generator.surfaceAt(8);
   for (let x = 4; x <= 14; x++) {
-    for (let y = ground - 5; y < ground; y++) session.world.setBlock(x, y, Block.Air);
+    for (let y = ground - 5; y < ground; y++) {
+      session.world.setBlock(x, y, Block.Air);
+      if (session.world.getBackgroundOrigin(x, y) === "trunk") session.world.setBackground(x, y, Block.Air);
+    }
     session.world.setBlock(x, ground, Block.Dirt);
   }
   session.player.y = ground * TILE_SIZE - PLAYER_HEIGHT;
@@ -70,7 +73,7 @@ describe("non-stackable tools and stone pickaxes", () => {
     const session = sessionWithTool();
     const y = session.world.generator.surfaceAt(8) - 3;
     session.world.setBlockOnPlane(10, y, Block.Stone, 0, plane);
-    expect(session.setHotbarPlane(2, plane)).toEqual({ ok: true });
+    expect(session.setHotbarPlane(2, plane)).toMatchObject({ ok: false });
     for (let hit = 1; hit < 6; hit++) {
       expect(session.mine(10, y)).toEqual({ ok: true, destroyed: false });
       expect(session.getBlockDamage(10, y, plane)).toBe(hit * 2);
@@ -82,15 +85,15 @@ describe("non-stackable tools and stone pickaxes", () => {
     expect(session.totalItems("stone")).toBe(1);
   });
 
-  it("is neither placeable nor rotatable", () => {
+  it("is neither placeable nor rotatable and cannot select a mining plane", () => {
     const session = sessionWithTool();
     const before = session.snapshot(2000);
     const y = session.world.generator.surfaceAt(8) - 3;
     expect(session.place(10, y).ok).toBe(false);
     expect(session.rotateSelected(1).ok).toBe(false);
     expect(session.snapshot(2000)).toEqual(before);
-    expect(session.toggleHotbarPlane(2)).toEqual({ ok: true });
-    expect(session.selectedPlane).toBe("background");
+    expect(session.toggleHotbarPlane(2)).toMatchObject({ ok: false });
+    expect(session.selectedPlane).toBe("foreground");
   });
 
   it("does not wear on air, out-of-range or immutable natural backgrounds", () => {
@@ -98,7 +101,7 @@ describe("non-stackable tools and stone pickaxes", () => {
     const ground = session.world.generator.surfaceAt(8);
     expect(session.mine(10, ground - 3).ok).toBe(false);
     expect(session.mine(1000, ground).ok).toBe(false);
-    session.setHotbarPlane(2, "background");
+    session.world.setBlock(8, ground + 1, Block.Air);
     expect(session.mine(8, ground + 1)).toEqual({ ok: false, silent: true });
     expect(session.hotbar[2]).toEqual(pickaxe());
   });

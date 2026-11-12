@@ -1,5 +1,15 @@
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const recentCommits = execFileSync("git", ["log", "-12", "--format=%H%x00%cI%x00%s"], {
+  cwd: fileURLToPath(new URL(".", import.meta.url)),
+  encoding: "utf8",
+}).trim().split("\n").map((line) => {
+  const [hash, date, subject] = line.trimEnd().split("\0");
+  return { hash, date, subject };
+});
 
 const repositoryName = process.env.GITHUB_REPOSITORY?.split("/")[1];
 const base =
@@ -9,6 +19,9 @@ const base =
 
 export default defineConfig({
   base,
+  define: {
+    __RECENT_COMMITS__: JSON.stringify(recentCommits),
+  },
   plugins: [
     VitePWA({
       registerType: "prompt",

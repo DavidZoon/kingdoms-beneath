@@ -5,7 +5,7 @@ import {
 import type { BlockDamage, GroundDrop, SaveGame } from "../save/types";
 import {
   addItems, availableItemSpace, emptyInventory, getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT,
-  ITEM_CAPACITY, STACK_SIZE, cloneInventory, isToolStack, removeInventoryStack, type ItemStack,
+  ITEM_CAPACITY, STACK_SIZE, cloneInventory, isToolStack, removeInventoryStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
 import {
   isRecipeId, RECIPES, requiredMaterials, validCraftQuantity, type CraftJob, type RecipeId,
@@ -29,6 +29,11 @@ export type MiningResult =
   | { ok: false; reason: string }
   | { ok: false; silent: true };
 export type ResourceGrantResult = { ok: true; added: number } | { ok: false; reason: string };
+export interface MiningTarget {
+  x: number;
+  y: number;
+  plane: ConstructionPlane;
+}
 
 export class GameSession {
   readonly world: WorldModel;
@@ -117,7 +122,10 @@ export class GameSession {
       return { ok: false, reason: "Plan ou emplacement de raccourci invalide." };
     }
     const stack = this.hotbar[index];
-    if (stack && !canUseItemOnPlane(stack.itemId, plane)) {
+    if (!stack || isToolStack(stack)) {
+      return { ok: false, reason: "Le plan de minage est automatique : premier plan, puis arrière-plan." };
+    }
+    if (!canUseItemOnPlane(stack.itemId, plane)) {
       return { ok: false, reason: `${ITEM_LABELS[stack.itemId]} ne peut pas être utilisé sur ce plan.` };
     }
     this.hotbarPlanes[index] = plane;
@@ -328,7 +336,17 @@ export class GameSession {
   }
 
   dropSelectedItem(quantity = 1): ActionResult {
-    const stack = this.hotbar[this.selectedSlot];
+    return this.dropStack({ area: "hotbar", index: this.selectedSlot }, quantity);
+  }
+
+  dropStack(source: SlotLocation, quantity = 1): ActionResult {
+    if ((source.area !== "inventory" && source.area !== "hotbar") ||
+        !Number.isInteger(source.index) || source.index < 0 ||
+        source.index >= (source.area === "inventory" ? INVENTORY_SLOT_COUNT : HOTBAR_SLOT_COUNT)) {
+      return { ok: false, reason: "Emplacement de dépôt invalide." };
+    }
+    const stack = source.area === "inventory"
+      ? getStacks(this.inventory)[source.index] : this.hotbar[source.index];
     if (!stack) return { ok: false, reason: "Aucune ressource à déposer." };
     if (!Number.isSafeInteger(quantity) || quantity <= 0) {
       return { ok: false, reason: "Quantité à déposer invalide." };
@@ -338,10 +356,13 @@ export class GameSession {
     }
     const amount = Math.min(quantity, STACK_SIZE, stack.quantity);
     const dropped: ItemStack = isToolStack(stack) ? { ...stack } : { itemId: stack.itemId, quantity: amount };
-    if (isToolStack(stack)) this.hotbar[this.selectedSlot] = null;
-    else {
+    if (source.area === "inventory") {
+      removeInventoryStack(this.inventory, source.index, amount);
+    } else if (isToolStack(stack)) {
+      this.hotbar[source.index] = null;
+    } else {
       stack.quantity -= amount;
-      if (stack.quantity === 0) this.hotbar[this.selectedSlot] = null;
+      if (stack.quantity === 0) this.hotbar[source.index] = null;
     }
     this.groundDrops.push({
       id: crypto.randomUUID(),
@@ -378,12 +399,60 @@ export class GameSession {
     return { ok: true, destroyed };
   }
 
-  mine(x: number, y: number, power = this.miningPower): MiningResult {
+  getMiningPlane(x: number, y: number): ConstructionPlane {
+    return this.world.getBlock(x, y) === Block.Air ? "background" : "foreground";
+  }
+
+  getMiningTarget(x: number, y: number): MiningTarget | null {
+    if (!this.withinReach(x, y)) return null;
+    const plane = this.getMiningPlane(x, y);
+    const fromX = (this.player.x + PLAYER_WIDTH / 2) / TILE_SIZE;
+    const fromY = (this.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
+    const dx = x + 0.5 - fromX;
+    const dy = y + 0.5 - fromY;
+    const stepX = Math.sign(dx);
+    const stepY = Math.sign(dy);
+    const deltaX = dx === 0 ? Infinity : 1 / Math.abs(dx);
+    const deltaY = dy === 0 ? Infinity : 1 / Math.abs(dy);
+    let cellX = Math.floor(fromX);
+    let cellY = Math.floor(fromY);
+    let nextX = dx === 0 ? Infinity : ((stepX > 0 ? cellX + 1 : cellX) - fromX) / dx;
+    let nextY = dy === 0 ? Infinity : ((stepY > 0 ? cellY + 1 : cellY) - fromY) / dy;
+    const blocksRay = (cx: number, cy: number): boolean => {
+      const block = this.world.getBlockOnPlane(cx, cy, plane);
+      return block !== Block.Air && (plane === "foreground" ||
+        (this.world.getBackgroundOrigin(cx, cy) !== "natural" && BLOCKS[block].durability !== null));
+    };
+
+    // Visit every crossed cell, including both sides of a corner, without sampling gaps.
+    while (true) {
+      if (blocksRay(cellX, cellY) || (cellX === x && cellY === y)) {
+        return { x: cellX, y: cellY, plane };
+      }
+      if (Math.abs(nextX - nextY) < 1e-10) {
+        if (blocksRay(cellX + stepX, cellY)) return { x: cellX + stepX, y: cellY, plane };
+        if (blocksRay(cellX, cellY + stepY)) return { x: cellX, y: cellY + stepY, plane };
+        cellX += stepX;
+        cellY += stepY;
+        nextX += deltaX;
+        nextY += deltaY;
+      } else if (nextX < nextY) {
+        cellX += stepX;
+        nextX += deltaX;
+      } else {
+        cellY += stepY;
+        nextY += deltaY;
+      }
+    }
+  }
+
+  mine(targetX: number, targetY: number, power = this.miningPower): MiningResult {
     if (!Number.isSafeInteger(power) || power <= 0) {
       return { ok: false, reason: "Puissance de minage invalide." };
     }
-    if (!this.withinReach(x, y)) return { ok: false, reason: "Cible hors de portée." };
-    const plane = this.selectedPlane;
+    const target = this.getMiningTarget(targetX, targetY);
+    if (!target) return { ok: false, reason: "Cible hors de portée." };
+    const { x, y, plane } = target;
     const block = this.world.getBlockOnPlane(x, y, plane);
     if (plane === "background" && this.world.getBackgroundOrigin(x, y) === "natural") {
       return { ok: false, silent: true };

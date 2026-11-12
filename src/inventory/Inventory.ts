@@ -12,6 +12,7 @@ export interface MaterialStack {
   durability?: never;
 }
 export type ItemStack = MaterialStack | ToolStack;
+export type SlotLocation = { area: "inventory" | "hotbar"; index: number };
 
 export function isToolStack(stack: ItemStack): stack is ToolStack {
   return isToolItem(stack.itemId);

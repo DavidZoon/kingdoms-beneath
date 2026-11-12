@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../game/GameSession";
+import { PLAYER_HEIGHT, PLAYER_WIDTH } from "../player/PlayerController";
 import { parseSave, serializeSave } from "../save/schema";
 import { Block, TILE_SIZE } from "./blocks";
 import { WorldModel } from "./WorldModel";
@@ -24,7 +25,11 @@ describe("piece rotation", () => {
     session.hotbar[2] = { itemId: "woodStairs", quantity: 2, ...(rotation ? { rotation } : {}) };
     const x = 10;
     const y = Math.floor(session.player.y / TILE_SIZE);
-    session.world.setBlock(x, y, Block.Air);
+    const fromX = Math.floor((session.player.x + PLAYER_WIDTH / 2) / TILE_SIZE);
+    const fromY = Math.floor((session.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    for (let cx = fromX; cx <= x; cx++) {
+      for (let cy = y; cy <= fromY; cy++) session.world.setBlock(cx, cy, Block.Air);
+    }
     session.world.setBlock(x + 1, y, Block.Stone);
     expect(session.place(x, y)).toEqual({ ok: true });
     expect(session.world.getRotation(x, y)).toBe(rotation);

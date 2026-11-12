@@ -4,31 +4,33 @@ import { InputController } from "../input/InputController";
 import { SaveRepository } from "../save/SaveRepository";
 import { MAX_SAVE_BYTES, SaveValidationError, parseSave, serializeSave } from "../save/schema";
 import type { SaveGame } from "../save/types";
-import { BLOCK_ITEMS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isItemId } from "../world/blocks";
+import { BLOCK_ITEMS, ITEM_BLOCKS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isItemId } from "../world/blocks";
 import {
-  getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack,
+  getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
 import {
-  isRecipeId, MAX_CRAFT_QUANTITY, RECIPES, RECIPE_IDS, requiredMaterials, validCraftQuantity, type RecipeId,
+  clampCraftQuantity, isRecipeId, MAX_CRAFT_SELECTION, RECIPES, RECIPE_IDS, type RecipeId,
 } from "../crafting/Recipes";
 import { dayPhaseAt } from "../lighting/WorldClock";
 import { isLightingQuality } from "../lighting/quality";
 import { hudCameraCenter } from "../rendering/camera";
+import { blockIconUrl } from "../rendering/blockTextures";
 import { InstallPrompt, isRunningAsApp } from "../pwa/installPrompt";
 import {
   applyOrientation, isOrientationPreference, readOrientationPreference, writeOrientationPreference,
   type OrientationPreference,
 } from "../pwa/orientation";
 import { registerPwa } from "../pwa/registerPwa";
+import { createRoadmapDialog } from "./roadmap";
 
-type SlotLocation = { area: "inventory" | "hotbar"; index: number };
 type StackSource = SlotLocation & { stack: ItemStack };
 type TouchDrag = { pointerId: number; x: number; y: number; source: StackSource; moved: boolean };
 
 function itemIcon(stack: ItemStack): string {
   const tool = isToolStack(stack);
+  const background = tool ? "" : `background-image: url('${blockIconUrl(ITEM_BLOCKS[stack.itemId])}');`;
   return `<span class="item-icon">
-    <span aria-hidden="true" class="block-swatch ${stack.itemId}${tool ? " tool" : ""}" style="transform: rotate(${stack.rotation ?? 0}deg)"></span>
+    <span aria-hidden="true" class="block-swatch ${stack.itemId}${tool ? " tool" : ""}" style="${background} transform: rotate(${stack.rotation ?? 0}deg)"></span>
     ${tool ? `<progress class="item-durability" aria-label="Durabilité de ${ITEM_LABELS[stack.itemId]}" max="${TOOLS[stack.itemId].maxDurability}" value="${stack.durability}"></progress>` : ""}
   </span>`;
 }
@@ -124,6 +126,7 @@ export class Application {
                 <button id="export-save" data-operation>Exporter la sauvegarde</button>
               </div>
               <button id="install-app" type="button" hidden>Installer l'application</button>
+              <button id="open-roadmap" type="button" aria-haspopup="dialog" aria-controls="roadmap-dialog">Roadmap et nouveautés</button>
             </div>
             <form id="new-game-form" class="new-game-form" hidden>
               <h3>Fonder une colonie</h3>
@@ -158,10 +161,11 @@ export class Application {
             <button id="open-dev" aria-expanded="false" aria-controls="dev-panel" hidden>DEV</button>
             <button id="zoom-out" aria-label="Réduire le zoom">−</button>
             <button id="zoom-in" aria-label="Augmenter le zoom">+</button>
+            <button id="toggle-help" type="button" aria-label="Afficher ou masquer l'aide" aria-expanded="false" aria-controls="play-help">?</button>
             <button id="pause-game">Pause / menu</button>
           </div>
         </header>
-        <p class="play-help" data-camera-edge="top">A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle · Maj : course ·
+        <p id="play-help" class="play-help" data-camera-edge="top" hidden>A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle · Maj : course ·
           Raccourci vide ou outil : maintenir le clic pour miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
           Carrés superposés : choisir le plan · 1–0 : sélection · I : inventaire · G : déposer · Échap : pause<br>
           Tactile : maintenez une case pour miner, touchez-la pour poser. Pincez pour zoomer.</p>
@@ -172,13 +176,12 @@ export class Application {
           </div>
           <div class="inventory-layout">
             <div class="inventory-storage">
-              <p id="inventory-summary" class="inventory-summary"></p>
               <p class="inventory-help">Glissez une pile ou sélectionnez-la, puis choisissez sa destination.</p>
               <div id="inventory-slots" class="inventory-slots" role="group" aria-label="Emplacements d'inventaire"></div>
               <h3>Barre de raccourcis</h3>
               ${hotbarMarkup("inventory-hotbar")}
               <p id="transfer-notice" class="notice" role="status"></p>
-              <button id="drop-item" class="drop-button">Déposer 1 ressource sélectionnée (G)</button>
+              <button id="drop-item" class="drop-button" disabled>Choisissez une pile à déposer (G)</button>
             </div>
             <aside class="craft-panel" aria-labelledby="craft-title">
               <h3 id="craft-title">Recettes connues</h3>
@@ -190,15 +193,13 @@ export class Application {
                     return `<option value="${id}"${id === "torch" ? " selected" : ""}>${ITEM_LABELS[recipe.output]} × ${recipe.outputPerRecipe}</option>`;
                   }).join("")}</optgroup>`).join("")}
               </select>
-              <label for="craft-quantity">Quantité d'objets</label>
-              <input id="craft-quantity" type="number" min="2" max="${MAX_CRAFT_QUANTITY}" step="2" value="2">
-              <p id="craft-materials" class="craft-materials"></p>
+              <label for="craft-quantity">Quantité d'objets : <output id="craft-quantity-value" for="craft-quantity">2</output>
+                <span id="craft-quantity-max">Max 98</span></label>
+              <input id="craft-quantity" type="range" min="2" max="98" step="2" value="2">
               <button id="craft-start" class="primary" type="button">Fabriquer</button>
               <div class="craft-progress">
-                <label for="craft-item-progress">Objet en cours <span id="craft-item-status"></span></label>
-                <progress id="craft-item-progress" max="1" value="0"></progress>
-                <label for="craft-total-progress">Fabrication totale <span id="craft-total-status"></span></label>
-                <progress id="craft-total-progress" max="1" value="0"></progress>
+                <progress id="craft-item-progress" aria-label="Objet en cours" max="1" value="0"></progress>
+                <progress id="craft-total-progress" aria-label="Fabrication totale" max="1" value="0"></progress>
               </div>
               <p id="craft-notice" class="notice" role="status"></p>
             </aside>
@@ -284,6 +285,10 @@ export class Application {
       </div>
       <input id="save-file" type="file" accept=".json,application/json" hidden>
     `;
+    const roadmap = createRoadmapDialog();
+    this.root.append(roadmap);
+    this.element("open-roadmap").addEventListener("click", () => roadmap.showModal());
+    roadmap.addEventListener("close", () => this.element("open-roadmap").focus());
     document.body.append(this.root);
     this.controls = new InputController(
       () => this.togglePause(),
@@ -386,6 +391,11 @@ export class Application {
     });
     this.element("export-save").addEventListener("click", () => { void this.run(() => this.exportSaved()); });
     this.element("pause-game").addEventListener("click", () => this.togglePause());
+    this.element("toggle-help").addEventListener("click", () => {
+      const help = this.element("play-help");
+      help.hidden = !help.hidden;
+      this.element("toggle-help").setAttribute("aria-expanded", String(!help.hidden));
+    });
     this.element("open-inventory").addEventListener("click", () => this.toggleInventory());
     this.element("close-inventory").addEventListener("click", () => this.toggleInventory(false));
     this.element("open-dev").addEventListener("click", () => this.toggleDev());
@@ -444,11 +454,16 @@ export class Application {
     });
     this.element("craft-start").addEventListener("click", () => {
       if (!this.session || this.paused) return;
+      this.updateCraftHud();
       const recipe = this.element("recipe-list");
       const quantity = this.element("craft-quantity");
       if (!(recipe instanceof HTMLSelectElement) || !isRecipeId(recipe.value) ||
           !(quantity instanceof HTMLInputElement)) {
         this.element("craft-notice").textContent = "Sélection de recette invalide.";
+        return;
+      }
+      if (quantity.valueAsNumber === 0) {
+        this.element("craft-notice").textContent = "Ressources insuffisantes pour cette recette.";
         return;
       }
       const result = this.session.startCraft(recipe.value, quantity.valueAsNumber);
@@ -658,6 +673,8 @@ export class Application {
     this.element("main-menu").hidden = true;
     this.element("play-ui").hidden = false;
     this.element("play-ui").inert = false;
+    this.element("play-help").hidden = true;
+    this.element("toggle-help").setAttribute("aria-expanded", "false");
     this.element("pause-screen").hidden = true;
     this.element("save-state").textContent = "Sauvegarde automatique · 5 s";
     const topHud = [...this.root.querySelectorAll<HTMLElement>('[data-camera-edge="top"]')];
@@ -717,6 +734,31 @@ export class Application {
 
   private dropSelectedItem(): void {
     if (!this.session || this.paused) return;
+    if (this.inventoryIsOpen()) {
+      const source = this.transferSource;
+      if (!source) {
+        this.element("transfer-notice").textContent = "Sélectionnez une pile dans le sac ou les raccourcis pour la déposer.";
+        return;
+      }
+      if (!this.sourceIsCurrent(source)) {
+        this.element("transfer-notice").textContent = "La pile a changé : sélectionnez-la à nouveau.";
+        this.clearTransfer();
+        this.updateHud();
+        return;
+      }
+      const result = this.session.dropStack(source);
+      this.element("transfer-notice").textContent = result.ok
+        ? `${ITEM_LABELS[source.stack.itemId]} : 1 objet déposé au sol.` : result.reason;
+      if (result.ok) {
+        const remaining = this.sourceAt(source);
+        this.clearTransfer();
+        if (source.stack.quantity > 1 && remaining?.stack.itemId === source.stack.itemId) {
+          this.transferSource = remaining;
+        }
+      }
+      this.updateHud();
+      return;
+    }
     const result = this.session.dropSelectedItem();
     this.element("action-message").textContent = result.ok ? "Ressource déposée au sol." : result.reason;
     this.updateHud();
@@ -789,6 +831,12 @@ export class Application {
     return stack ? { ...location, stack: { ...stack } } : null;
   }
 
+  private sourceIsCurrent(source: StackSource): boolean {
+    const current = this.stackAt(source);
+    return !!current && current.itemId === source.stack.itemId && current.quantity === source.stack.quantity &&
+      current.durability === source.stack.durability;
+  }
+
   private clearTransfer(): void {
     this.transferSource = null;
     this.dragSource = null;
@@ -802,20 +850,26 @@ export class Application {
       const location = this.slotAt(button);
       const selected = !!source && location?.area === source.area && location.index === source.index;
       button.classList.toggle("transfer-source", selected);
-      if (location?.area === "inventory") button.setAttribute("aria-pressed", String(selected));
+      if (location?.area === "inventory" || this.element("inventory-hotbar").contains(button)) {
+        button.setAttribute("aria-pressed", String(selected));
+      }
     }
+    const dropButton = this.element("drop-item");
+    if (!(dropButton instanceof HTMLButtonElement)) throw new Error("Bouton de dépôt invalide.");
+    dropButton.disabled = !source || !this.sourceIsCurrent(source);
+    dropButton.textContent = source
+      ? `Déposer 1 ${ITEM_LABELS[source.stack.itemId]} (G)` : "Choisissez une pile à déposer (G)";
   }
 
   private moveStack(source: StackSource, target: SlotLocation): void {
     if (!this.session || !this.inventoryIsOpen()) return;
-    const current = this.stackAt(source);
-    if (!current || current.itemId !== source.stack.itemId || current.quantity !== source.stack.quantity ||
-        current.durability !== source.stack.durability) {
+    if (!this.sourceIsCurrent(source)) {
       this.element("transfer-notice").textContent = "La pile a changé : sélectionnez-la à nouveau.";
       this.clearTransfer();
       this.updateHud();
       return;
     }
+    const current = source.stack;
     let result;
     if (source.area === "inventory" && target.area === "hotbar") {
       result = this.session.moveInventoryToHotbar(source.index, target.index);
@@ -890,7 +944,7 @@ export class Application {
       } else {
         this.transferSource = this.sourceAt(target);
         this.element("transfer-notice").textContent = this.transferSource
-          ? "Pile sélectionnée : choisissez sa destination."
+          ? "Pile sélectionnée : choisissez sa destination ou déposez un objet (G)."
           : "Cet emplacement est vide.";
       }
       this.highlightTransferSource();
@@ -984,7 +1038,7 @@ export class Application {
         !(quantity instanceof HTMLInputElement)) throw new Error("Contrôles de fabrication invalides.");
     const perRecipe = RECIPES[list.value].outputPerRecipe;
     quantity.min = String(perRecipe);
-    quantity.max = String(Math.floor(MAX_CRAFT_QUANTITY / perRecipe) * perRecipe);
+    quantity.max = String(Math.floor(MAX_CRAFT_SELECTION / perRecipe) * perRecipe);
     quantity.step = String(perRecipe);
     quantity.value = String(perRecipe);
   }
@@ -1003,11 +1057,6 @@ export class Application {
     const job = session.crafting;
     if (job) {
       list.value = job.recipeId;
-      const perRecipe = RECIPES[job.recipeId].outputPerRecipe;
-      quantity.min = String(perRecipe);
-      quantity.max = String(Math.floor(MAX_CRAFT_QUANTITY / perRecipe) * perRecipe);
-      quantity.step = String(perRecipe);
-      quantity.value = String(job.quantity);
       this.lastCraft = { recipeId: job.recipeId, quantity: job.quantity };
     } else if (this.lastCraft) {
       this.finishedCraft = this.lastCraft;
@@ -1019,28 +1068,26 @@ export class Application {
     }
     if (!isRecipeId(list.value)) throw new Error("Recette sélectionnée invalide.");
     const recipe = RECIPES[list.value];
+    const craftable = job ? job.quantity
+      : clampCraftQuantity(recipe, MAX_CRAFT_SELECTION, (itemId) => session.totalItems(itemId));
+    const maximum = Math.floor(MAX_CRAFT_SELECTION / recipe.outputPerRecipe) * recipe.outputPerRecipe;
+    quantity.min = String(craftable === 0 ? 0 : recipe.outputPerRecipe);
+    quantity.max = String(job ? Math.max(maximum, job.quantity) : maximum);
+    quantity.step = String(recipe.outputPerRecipe);
+    quantity.value = String(job ? job.quantity
+      : clampCraftQuantity(recipe, quantity.valueAsNumber, (itemId) => session.totalItems(itemId)));
+    this.element("craft-quantity-value").textContent = quantity.value;
+    this.element("craft-quantity-max").textContent = `Max ${craftable}`;
     list.disabled = !!job;
-    quantity.disabled = !!job;
-    button.disabled = !!job;
-    if (validCraftQuantity(recipe, quantity.valueAsNumber)) {
-      const materials = requiredMaterials(recipe, quantity.valueAsNumber).map(([itemId, needed]) =>
-        job ? `${needed} ${ITEM_LABELS[itemId]}` :
-          `${needed} ${ITEM_LABELS[itemId]} (disponible : ${session.totalItems(itemId)})`,
-      ).join(" · ");
-      this.element("craft-materials").textContent =
-        `${job ? "Matériaux réservés" : "Matériaux requis"} : ${materials}. ` +
-        `Temps par objet : ${(recipe.ticksPerItem / 60).toLocaleString("fr-FR")} s.`;
-    } else {
-      this.element("craft-materials").textContent =
-        `Quantité invalide : choisissez un multiple de ${recipe.outputPerRecipe}, de ${quantity.min} à ${quantity.max}.`;
-    }
+    quantity.disabled = !!job || craftable === 0;
+    button.disabled = !!job || craftable === 0;
     if (job) {
       itemProgress.max = recipe.ticksPerItem;
       itemProgress.value = job.progressTicks;
       totalProgress.max = job.quantity * recipe.ticksPerItem;
       totalProgress.value = job.completed * recipe.ticksPerItem + job.progressTicks;
-      this.element("craft-item-status").textContent = `${Math.floor(job.progressTicks * 100 / recipe.ticksPerItem)} %`;
-      this.element("craft-total-status").textContent = `${job.completed} / ${job.quantity}`;
+      itemProgress.setAttribute("aria-valuetext", `${Math.floor(job.progressTicks * 100 / recipe.ticksPerItem)} %`);
+      totalProgress.setAttribute("aria-valuetext", `${job.completed} / ${job.quantity}`);
       if (session.craftingBlocked) {
         const notice = this.element("craft-notice");
         const message = "Rangement plein : libérez de la place dans l'inventaire ou une pile du même objet dans les raccourcis. Les matériaux restent réservés.";
@@ -1056,8 +1103,8 @@ export class Application {
       itemProgress.value = finished ? 1 : 0;
       totalProgress.max = 1;
       totalProgress.value = finished ? 1 : 0;
-      this.element("craft-item-status").textContent = finished ? "100 %" : "—";
-      this.element("craft-total-status").textContent = finished ? `${finished.quantity} / ${finished.quantity}` : "—";
+      itemProgress.setAttribute("aria-valuetext", finished ? "100 %" : "0 %");
+      totalProgress.setAttribute("aria-valuetext", finished ? `${finished.quantity} / ${finished.quantity}` : "0");
       this.wasCraftBlocked = false;
     }
   }
@@ -1068,17 +1115,18 @@ export class Application {
     const item = session.selectedItem;
     const stack = session.hotbar[session.selectedSlot];
     const tool = stack && isToolStack(stack) ? stack : null;
+    const mining = item === null || tool !== null;
     const plane = session.selectedPlane;
     const rotation = session.selectedRotation;
     const planeLabel = plane === "foreground" ? "Premier plan" : "Arrière-plan";
     const nextPlane = plane === "foreground" ? "background" : "foreground";
     const destination = nextPlane === "foreground" ? "au premier plan" : "à l'arrière-plan";
-    const canSwitch = item === null || canUseItemOnPlane(item, nextPlane);
+    const canSwitch = !mining && item !== null && canUseItemOnPlane(item, nextPlane);
     const description = tool
-      ? `${ITEM_LABELS[tool.itemId]} · Miner · ${planeLabel} · ${tool.durability} / ${TOOLS[tool.itemId].maxDurability}`
+      ? `${ITEM_LABELS[tool.itemId]} · Miner · Plan automatique · ${tool.durability} / ${TOOLS[tool.itemId].maxDurability}`
       : item
       ? `${ITEM_LABELS[item]} · Poser · ${planeLabel} · ${rotation}°`
-      : `Mains nues · Miner · ${planeLabel}`;
+      : "Mains nues · Miner · Plan automatique";
     for (const controls of this.root.querySelectorAll<HTMLElement>(".construction-controls")) {
       const preview = controls.querySelector<HTMLElement>("[data-selection-preview]");
       const details = controls.querySelector<HTMLElement>("[data-selection-details]");
@@ -1102,7 +1150,9 @@ export class Application {
       for (const button of controls.querySelectorAll<HTMLButtonElement>("[data-rotate]")) {
         button.disabled = item === null || tool !== null;
       }
-      const label = canSwitch
+      const label = mining
+        ? "Minage automatique : premier plan, puis arrière-plan si la cellule est vide au premier plan."
+        : canSwitch
         ? `${planeLabel}. Passer ${destination}.`
         : `${planeLabel}. ${item ? ITEM_LABELS[item] : "Objet"} interdit ${destination}.`;
       planeButton.disabled = !canSwitch;
@@ -1173,11 +1223,6 @@ export class Application {
     }
     this.updateConstructionControls();
     this.highlightTransferSource();
-    this.element("inventory-summary").textContent =
-      `${stacks.length} / ${INVENTORY_SLOT_COUNT} emplacements occupés · 99 objets maximum par pile · Outils non empilables.`;
-    const dropButton = this.element("drop-item");
-    if (!(dropButton instanceof HTMLButtonElement)) throw new Error("Bouton de dépôt invalide.");
-    dropButton.disabled = !hotbar[selectedSlot];
     this.updateCraftHud();
   }
 }

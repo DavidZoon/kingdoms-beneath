@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GameSession } from "../game/GameSession";
+import { GameSession, MAX_GROUND_DROPS } from "../game/GameSession";
 import { carriedTorchSource } from "../lighting/LightField";
 import { parseSave, serializeSave } from "../save/schema";
 import { Block, TILE_SIZE } from "../world/blocks";
@@ -70,6 +70,46 @@ describe("shortcut stacks", () => {
     expect(session.hotbar[4]).toBeNull();
     expect(session.groundDrops[0]).toMatchObject({ itemId: "torch", quantity: 1 });
     expect(carriedTorchSource(session.player, session.selectedItem)).toBeNull();
+  });
+
+  it("drops from the requested bag or shortcut slot without changing the equipped slot", () => {
+    const session = GameSession.create("Test", "drop", 1000);
+    session.inventory.stone = 2;
+    expect(session.dropStack({ area: "inventory", index: 0 })).toEqual({ ok: true });
+    expect(session.inventory.stone).toBe(1);
+    expect(session.dropStack({ area: "hotbar", index: 0 })).toEqual({ ok: true });
+    expect(session.hotbar[0]?.quantity).toBe(11);
+    expect(session.hotbar[2]).toEqual({ itemId: "wood", quantity: 24 });
+    expect(session.selectedSlot).toBe(2);
+    expect(session.groundDrops.map(({ itemId, quantity }) => ({ itemId, quantity }))).toEqual([
+      { itemId: "stone", quantity: 1 }, { itemId: "dirt", quantity: 1 },
+    ]);
+  });
+
+  it("drops the chosen worn tool from the bag without changing the others", () => {
+    const session = GameSession.create("Test", "drop", 1000);
+    session.inventory.tools.push(
+      { itemId: "stonePickaxe", quantity: 1, durability: 50 },
+      { itemId: "stonePickaxe", quantity: 1, durability: 317 },
+    );
+    expect(session.dropStack({ area: "inventory", index: 1 })).toEqual({ ok: true });
+    expect(session.inventory.tools).toEqual([{ itemId: "stonePickaxe", quantity: 1, durability: 50 }]);
+    expect(session.groundDrops[0]).toMatchObject({ itemId: "stonePickaxe", quantity: 1, durability: 317 });
+    expect(session.selectedItem).toBe("wood");
+  });
+
+  it("rejects invalid or blocked deposits without removing items", () => {
+    const session = GameSession.create("Test", "drop", 1000);
+    session.inventory.stone = 2;
+    const before = session.snapshot(2000);
+    expect(session.dropStack({ area: "inventory", index: -1 }).ok).toBe(false);
+    expect(session.dropStack({ area: "hotbar", index: 10 }).ok).toBe(false);
+    expect(session.dropStack({ area: "inventory", index: 1 }).ok).toBe(false);
+    expect(session.dropStack({ area: "inventory", index: 0 }, 0).ok).toBe(false);
+    expect(session.snapshot(2000)).toEqual(before);
+    session.groundDrops.length = MAX_GROUND_DROPS;
+    expect(session.dropStack({ area: "inventory", index: 0 }).ok).toBe(false);
+    expect(session.inventory.stone).toBe(2);
   });
 
   it.each([
