@@ -73,7 +73,7 @@ Les torches ont 2 points de durabilité. La **Pioche en pierre**, dans la catég
 
 Les outils ne sont ni empilables ni posables comme blocs; chaque exemplaire occupe un emplacement et garde sa propre durabilité pendant les transferts, dépôts au sol, ramassages et sauvegardes. Une barre sur son icône indique son état dans l'inventaire, les raccourcis, l'aperçu et au sol. L'icône de la pioche est un pixel art 32×32 à fond transparent, recréé d'après le dessin fourni. Les futures armes et pièces d'équipement pourront reprendre ce rangement individuel.
 
-Le **Mode créatif** est désactivé par défaut. Activez-le à la création ou dans **Pause / menu → Options de la partie → Mode créatif**. Le bouton **DEV** apparaît alors dans le HUD : choisissez une ressource et une quantité pour l'ajouter à l'inventaire. La capacité des piles reste respectée, et un ajout partiel ou impossible est signalé. Désactiver l'option masque le menu et interdit les ajouts. Cette option ne supprime ni la durabilité ni les coûts de placement.
+Le **Mode créatif** est désactivé par défaut. Activez-le à la création ou dans **Pause / menu → Options de la partie → Mode créatif**. Le bouton **DEV** apparaît alors dans le HUD : choisissez un objet dans la galerie, puis réglez la quantité par le curseur ou le champ numérique synchronisés pour l'ajouter à l'inventaire. Pour un objet non empilable, la quantité est verrouillée à 1. La capacité des piles reste respectée, et un ajout partiel ou impossible est signalé. Désactiver l'option masque le menu et interdit les ajouts. Cette option ne supprime ni la durabilité ni les coûts de placement.
 
 ### Matériaux et ressources de forêt
 
@@ -105,7 +105,7 @@ Les objets empilables récoltés ou fabriqués remplissent d'abord les piles du 
 
 Les vignettes du sac et des raccourcis dans l'inventaire ont la même taille que celles de la barre en jeu, y compris sur mobile. Inventaire ouvert, sélectionnez une pile du sac ou des raccourcis, puis utilisez **Déposer** ou **G** pour en déposer un objet : cette sélection est indépendante de l'objet équipé en jeu. Inventaire fermé, **G** dépose toujours l'objet équipé.
 
-Les icônes du sac, des raccourcis, de l'aperçu et des objets déposés utilisent le même dessin pixel art que les blocs en jeu. La pioche conserve son image dédiée.
+Les icônes du sac, des raccourcis, de l'aperçu et des objets déposés utilisent le même dessin pixel art que les blocs en jeu. La pioche conserve son image dédiée. Au sol, tous les objets sont affichés à la taille d'un bloc (16×16), avec une barre de durabilité proportionnée pour les outils.
 
 Les deux flèches de rotation et le bouton de plan sont regroupés au-dessus de la barre, à côté d'un aperçu de l'objet sélectionné. Les flèches font pivoter la pièce de 90° vers la gauche ou la droite; l'aperçu et l'icône suivent l'orientation, appliquée à la pose et conservée dans la sauvegarde. Une sélection vide affiche des mains nues; la rotation et le choix de plan sont désactivés pour les mains et les outils. La géométrie des escaliers de premier plan suit leur rotation.
 

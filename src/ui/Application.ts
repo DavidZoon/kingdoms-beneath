@@ -4,7 +4,7 @@ import { InputController } from "../input/InputController";
 import { SaveRepository } from "../save/SaveRepository";
 import { MAX_SAVE_BYTES, SaveValidationError, parseSave, serializeSave } from "../save/schema";
 import type { SaveGame } from "../save/types";
-import { MATERIAL_ITEMS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId } from "../world/blocks";
+import { ITEMS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId, isToolItem, type ItemId } from "../world/blocks";
 import {
   getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
@@ -98,6 +98,7 @@ export class Application {
   private lastCraft: { recipeId: RecipeId; quantity: number } | null = null;
   private finishedCraft: { recipeId: RecipeId; quantity: number } | null = null;
   private wasCraftBlocked = false;
+  private devResource: ItemId = ITEMS[0];
   private readonly installPrompt: InstallPrompt;
   private reloadForUpdate: (() => Promise<void>) | null = null;
 
@@ -212,12 +213,19 @@ export class Application {
           </div>
           <p>Ajouter des ressources à l'inventaire, dans la limite des emplacements disponibles.</p>
           <form id="dev-resources" class="dev-form">
-            <label for="dev-resource">Ressource</label>
-            <select id="dev-resource">
-              <optgroup label="Matériaux">${MATERIAL_ITEMS.map((item) => `<option value="${item}">${ITEM_LABELS[item]}</option>`).join("")}</optgroup>
-              <optgroup label="Outils">${TOOL_ITEMS.map((item) => `<option value="${item}">${ITEM_LABELS[item]}</option>`).join("")}</optgroup>
-            </select>
+            <p id="dev-gallery-label">Ressources et outils</p>
+            <div id="dev-gallery" class="inventory-slots dev-gallery" role="group" aria-labelledby="dev-gallery-label">
+              ${ITEMS.map((item) => `<button type="button" class="inventory-slot" data-dev-resource="${item}"
+                aria-label="${ITEM_LABELS[item]}" title="${ITEM_LABELS[item]}" aria-pressed="${item === this.devResource}">
+                ${itemIcon(isToolItem(item)
+                  ? { itemId: item, quantity: 1, durability: TOOLS[item].maxDurability }
+                  : { itemId: item, quantity: 1 })}
+              </button>`).join("")}
+            </div>
+            <p id="dev-selected-resource" aria-live="polite">${ITEM_LABELS[this.devResource]}</p>
             <label for="dev-quantity">Quantité</label>
+            <input id="dev-quantity-slider" type="range" min="1" max="${ITEM_CAPACITY}" step="1" value="99"
+              aria-label="Quantité (curseur)">
             <input id="dev-quantity" type="number" min="1" max="${ITEM_CAPACITY}" step="1" value="99" required>
             <button type="submit" class="primary">Ajouter à l'inventaire</button>
           </form>
@@ -401,6 +409,10 @@ export class Application {
     this.element("open-dev").addEventListener("click", () => this.toggleDev());
     this.element("close-dev").addEventListener("click", () => this.toggleDev(false));
     this.element("dev-panel").addEventListener("keydown", (event) => {
+      if ((event.key === " " || event.key === "Enter") && event.target instanceof Element &&
+          event.target.closest("[data-dev-resource]")) {
+        event.stopPropagation();
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -423,20 +435,42 @@ export class Application {
       this.session.lightingQuality = event.target.value;
       this.element("lighting-notice").textContent = "Qualité d'éclairage mise à jour pour cette partie.";
     });
-    this.element("dev-resources").addEventListener("submit", (event) => {
-      event.preventDefault();
-      if (!this.session) return;
-      const resource = this.element("dev-resource");
-      const quantity = this.element("dev-quantity");
-      if (!(resource instanceof HTMLSelectElement) || !(quantity instanceof HTMLInputElement) ||
-          !isItemId(resource.value)) {
+    this.element("dev-gallery").addEventListener("click", (event) => {
+      const button = event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>("[data-dev-resource]") : null;
+      if (!button) return;
+      const item = button.dataset.devResource;
+      if (!isItemId(item)) {
         this.element("dev-notice").textContent = "Sélection de ressource invalide.";
         return;
       }
-      const requested = quantity.valueAsNumber;
-      const result = this.session.grantResources(resource.value, requested);
+      this.devResource = item;
+      for (const slot of this.element("dev-gallery").querySelectorAll<HTMLButtonElement>("[data-dev-resource]")) {
+        slot.setAttribute("aria-pressed", String(slot.dataset.devResource === item));
+      }
+      this.element("dev-selected-resource").textContent = ITEM_LABELS[item];
+      this.syncDevQuantity();
+    });
+    for (const id of ["dev-quantity", "dev-quantity-slider"]) {
+      this.element(id).addEventListener("input", (event) => {
+        if (event.target instanceof HTMLInputElement && event.target.validity.valid) {
+          this.syncDevQuantity(event.target.valueAsNumber);
+        }
+      });
+    }
+    this.element("dev-resources").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!this.session) return;
+      const resource = this.devResource;
+      const quantity = this.element("dev-quantity");
+      if (!(quantity instanceof HTMLInputElement)) {
+        this.element("dev-notice").textContent = "Sélection de ressource invalide.";
+        return;
+      }
+      const requested = isToolItem(resource) ? 1 : quantity.valueAsNumber;
+      const result = this.session.grantResources(resource, requested);
       this.element("dev-notice").textContent = result.ok
-        ? `${result.added} ${ITEM_LABELS[resource.value]} ajouté(s).${result.added < requested
+        ? `${result.added} ${ITEM_LABELS[resource]} ajouté(s).${result.added < requested
           ? ` Inventaire plein : ${requested - result.added} non ajouté(s).` : ""}`
         : result.reason;
       this.updateHud();
@@ -715,6 +749,20 @@ export class Application {
     this.updateHud();
   }
 
+  private syncDevQuantity(value?: number): void {
+    const quantity = this.element("dev-quantity");
+    const slider = this.element("dev-quantity-slider");
+    if (!(quantity instanceof HTMLInputElement) || !(slider instanceof HTMLInputElement)) {
+      throw new Error("Contrôles de quantité DEV introuvables.");
+    }
+    const locked = isToolItem(this.devResource);
+    quantity.max = slider.max = String(locked ? 1 : ITEM_CAPACITY);
+    quantity.disabled = slider.disabled = locked;
+    if (locked || value !== undefined) {
+      quantity.value = slider.value = locked ? "1" : String(value);
+    }
+  }
+
   private toggleDev(force?: boolean): void {
     if (!this.session || this.paused) return;
     const panel = this.element("dev-panel");
@@ -728,7 +776,11 @@ export class Application {
     panel.hidden = !open;
     this.controls.setInventoryOpen(open);
     this.element("open-dev").setAttribute("aria-expanded", String(open));
-    this.element(open ? "dev-resource" : "open-dev").focus();
+    if (open) {
+      this.element("dev-gallery").querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
+    } else {
+      this.element("open-dev").focus();
+    }
     this.updateHud();
   }
 

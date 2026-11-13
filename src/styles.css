@@ -153,8 +153,8 @@ h3 { font: 400 23px Georgia, serif; }
 }
 .craft-panel option { padding: 6px; }
 .craft-panel input { margin-top: 0; }
-.craft-panel input[type="range"] { padding: 0; accent-color: #d3b473; cursor: pointer; }
-.craft-panel input[type="range"]:disabled { cursor: not-allowed; opacity: 0.4; }
+.craft-panel input[type="range"], .dev-form input[type="range"] { padding: 0; accent-color: #d3b473; cursor: pointer; }
+.craft-panel input[type="range"]:disabled, .dev-form input:disabled { cursor: not-allowed; opacity: 0.4; }
 .craft-progress { display: grid; gap: 5px; margin-top: 6px; }
 .craft-progress progress { width: 100%; height: 14px; accent-color: #d3b473; }
 .craft-progress progress + progress { margin-top: 5px; }
@@ -173,11 +173,10 @@ h3 { font: 400 23px Georgia, serif; }
   border: 1px solid #73846c; border-radius: 4px; background: #142b23; color: #f2eedc;
 }
 .dev-form { display: grid; gap: 8px; }
-.dev-form select {
-  width: 100%; min-height: 44px; padding: 10px 12px; font: inherit;
-  border: 1px solid #73846c; border-radius: 4px; background: #142b23; color: #f2eedc;
-}
-.dev-form button { margin-top: 6px; }
+.dev-form p { margin: 0; }
+.dev-gallery { grid-auto-rows: var(--hotbar-slot); max-height: min(45dvh, 360px); overflow-y: auto; padding: 3px; }
+.dev-gallery .inventory-slot { touch-action: pan-y; }
+.dev-form > button { margin-top: 6px; }
 #dev-panel > p { font-size: 13px; line-height: 1.5; color: #c2cdb4; }
 .play-help {
   margin: 0 16px; padding: 10px; font-size: 11px; line-height: 1.6;

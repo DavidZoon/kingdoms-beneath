@@ -357,15 +357,17 @@ export class WorldScene extends Phaser.Scene {
       let image = this.groundDrops.get(drop.id);
       if (!image) {
         const harvest = drop.id.startsWith("harvest:") || drop.id.startsWith("plant:");
-        const size = harvest ? TILE_SIZE : TILE_ART_SIZE;
-        image = this.add.image(drop.x, drop.y, `drop-${drop.itemId}`).setDisplaySize(size, size).setDepth(harvest ? 1 : 3);
+        image = this.add.image(drop.x, drop.y, `drop-${drop.itemId}`)
+          .setDisplaySize(TILE_SIZE, TILE_SIZE).setDepth(harvest ? 1 : 3);
         this.groundDrops.set(drop.id, image);
       }
       image.setPosition(drop.x, drop.y);
       if (isToolStack(drop)) {
-        this.dropDurability.fillStyle(0x472e24).fillRect(drop.x - 16, drop.y + 12, 32, 3);
+        const left = drop.x - TILE_SIZE / 2;
+        const top = drop.y + TILE_SIZE / 2 - 3;
+        this.dropDurability.fillStyle(0x472e24).fillRect(left, top, TILE_SIZE, 2);
         this.dropDurability.fillStyle(0x9ac85e).fillRect(
-          drop.x - 16, drop.y + 12, 32 * drop.durability / TOOLS[drop.itemId].maxDurability, 3,
+          left, top, TILE_SIZE * drop.durability / TOOLS[drop.itemId].maxDurability, 2,
         );
       }
     }

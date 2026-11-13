@@ -1,8 +1,10 @@
 import { Block, BLOCKS, ITEM_BLOCKS, RESOURCES, TILE_ART_SIZE, isBlockItem, type BlockId, type MaterialItemId } from "../world/blocks";
+import { drawResourceIcon, drawResourceTile } from "./resourceArt";
 
 export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, x = 0): void {
   ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
   if (block === Block.Air) return;
+  if (drawResourceTile(ctx, block, x)) return;
   const definition = BLOCKS[block];
   ctx.fillStyle = definition.color;
   ctx.fillRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
@@ -90,6 +92,10 @@ export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, 
 }
 
 export function drawItemTexture(ctx: CanvasRenderingContext2D, item: MaterialItemId): void {
+  if (item in RESOURCES) {
+    ctx.clearRect(0, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    if (drawResourceIcon(ctx, item as keyof typeof RESOURCES)) return;
+  }
   if (isBlockItem(item)) {
     drawBlockTexture(ctx, ITEM_BLOCKS[item]);
     return;
