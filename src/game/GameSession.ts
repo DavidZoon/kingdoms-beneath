@@ -12,10 +12,11 @@ import {
 } from "../crafting/Recipes";
 import {
   Block, BLOCKS, ITEM_BLOCKS, ITEM_LABELS, MAX_TILE_X, TILE_SIZE, WORLD_HEIGHT,
-  ITEM_PLANES, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isConstructionPlane, isItemId, isToolItem, rotateQuarterTurn,
+  ITEM_PLANES, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isBlockItem, isConstructionPlane, isItemId, isLiquidBlock, isToolItem, rotateQuarterTurn,
   type ConstructionPlane, type Inventory, type ItemId, type Rotation,
 } from "../world/blocks";
 import { cellKey, WorldModel } from "../world/WorldModel";
+import { isPlantItem, type PlantItemId } from "../world/resources";
 import type { LightingQuality } from "../lighting/quality";
 
 export const MAX_STACK = ITEM_CAPACITY;
@@ -35,6 +36,13 @@ export interface MiningTarget {
   plane: ConstructionPlane;
 }
 
+export interface NaturalPlant {
+  id: string;
+  x: number;
+  y: number;
+  itemId: PlantItemId;
+}
+
 export class GameSession {
   readonly world: WorldModel;
   readonly player: PlayerState;
@@ -42,6 +50,8 @@ export class GameSession {
   readonly hotbar: Array<ItemStack | null>;
   readonly hotbarPlanes: ConstructionPlane[];
   readonly groundDrops: GroundDrop[];
+  private readonly collectedNaturalPickups: Set<string>;
+  private readonly collectedPlants: Set<string>;
   selectedSlot: number;
   crafting: CraftJob | null;
   tick: number;
@@ -58,6 +68,8 @@ export class GameSession {
     this.hotbar = save.hotbar.map((stack) => stack ? { ...stack } : null);
     this.hotbarPlanes = [...save.hotbarPlanes];
     this.groundDrops = save.groundDrops.map((drop) => ({ ...drop }));
+    this.collectedNaturalPickups = new Set(save.collectedNaturalPickups);
+    this.collectedPlants = new Set(save.collectedPlants);
     this.selectedSlot = save.selectedSlot;
     this.crafting = save.crafting ? { ...save.crafting } : null;
     this.tick = save.tick;
@@ -67,11 +79,11 @@ export class GameSession {
   }
 
   static create(name: string, seed: string, now = Date.now()): GameSession {
-    const world = new WorldModel(seed, [], 3);
+    const world = new WorldModel(seed, [], 5);
     return new GameSession({
       format: "kingdoms-beneath",
-      schemaVersion: 8,
-      generatorVersion: 3,
+      schemaVersion: 10,
+      generatorVersion: 5,
       id: crypto.randomUUID(),
       name,
       seed,
@@ -85,7 +97,7 @@ export class GameSession {
       },
       inventory: emptyInventory(),
       hotbar: [
-        { itemId: "dirt", quantity: 12 }, null, { itemId: "wood", quantity: 24 },
+        { itemId: "dirt", quantity: 12 }, null, { itemId: "pine_log", quantity: 24 },
         { itemId: "ladder", quantity: 6 }, { itemId: "torch", quantity: 4 },
         null, null, null, null, null,
       ],
@@ -95,6 +107,8 @@ export class GameSession {
       edits: [],
       backgroundEdits: [],
       groundDrops: [],
+      collectedNaturalPickups: [],
+      collectedPlants: [],
       blockDamage: [],
       creativeMode: false,
       lightingQuality: "standard",
@@ -125,6 +139,9 @@ export class GameSession {
     if (!stack || isToolStack(stack)) {
       return { ok: false, reason: "Le plan de minage est automatique : premier plan, puis arrière-plan." };
     }
+    if (!isBlockItem(stack.itemId)) {
+      return { ok: false, reason: "Cet objet n'est pas un bloc de construction." };
+    }
     if (!canUseItemOnPlane(stack.itemId, plane)) {
       return { ok: false, reason: `${ITEM_LABELS[stack.itemId]} ne peut pas être utilisé sur ce plan.` };
     }
@@ -152,6 +169,7 @@ export class GameSession {
     const stack = this.hotbar[this.selectedSlot];
     if (!stack) return { ok: false, reason: "L'emplacement sélectionné est vide." };
     if (isToolStack(stack)) return { ok: false, reason: "Les outils ne peuvent pas pivoter." };
+    if (!isBlockItem(stack.itemId)) return { ok: false, reason: "Cet objet n'est pas un bloc de construction." };
     const rotation = rotateQuarterTurn(this.selectedRotation, direction);
     if (rotation === 0) delete stack.rotation;
     else stack.rotation = rotation;
@@ -333,6 +351,30 @@ export class GameSession {
       if (collected === drop.quantity) this.groundDrops.splice(index, 1);
       else if (!isToolStack(drop)) drop.quantity -= collected;
     }
+    for (const drop of this.naturalPickups(
+      Math.floor((centerX - PICKUP_RANGE) / TILE_SIZE), Math.ceil((centerX + PICKUP_RANGE) / TILE_SIZE),
+      Math.floor((centerY - PICKUP_RANGE) / TILE_SIZE), Math.ceil((centerY + PICKUP_RANGE) / TILE_SIZE),
+    )) {
+      if (Math.hypot(centerX - drop.x, centerY - drop.y) > PICKUP_RANGE ||
+          this.collectedNaturalPickups.size >= MAX_EDITS) continue;
+      if (addItems(this.inventory, drop.itemId, 1, this.hotbar) === 1) this.collectedNaturalPickups.add(drop.id);
+    }
+  }
+
+  naturalPickups(left: number, right: number, top: number, bottom: number): GroundDrop[] {
+    const drops: GroundDrop[] = [];
+    if (this.world.generator.version < 4) return drops;
+    for (let x = Math.max(-MAX_TILE_X, left); x <= Math.min(MAX_TILE_X, right); x++) {
+      for (let y = Math.max(0, top); y <= Math.min(WORLD_HEIGHT - 2, bottom); y++) {
+        for (const pickup of this.world.generator.pickupsAt(x, y)) {
+          const id = `natural:${x},${y}:${pickup.itemId}`;
+          if (!this.collectedNaturalPickups.has(id)) drops.push({
+            id, x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE, itemId: pickup.itemId, quantity: 1,
+          });
+        }
+      }
+    }
+    return drops;
   }
 
   dropSelectedItem(quantity = 1): ActionResult {
@@ -387,6 +429,50 @@ export class GameSession {
     return stack && isToolStack(stack) ? TOOLS[stack.itemId].miningPower : 1;
   }
 
+  plantsAt(x: number, y: number): NaturalPlant[] {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || Math.abs(x) > MAX_TILE_X ||
+        y < 0 || y >= WORLD_HEIGHT - 1 || this.world.generator.version < 4) return [];
+    const plants: NaturalPlant[] = [];
+    for (const support of [
+      { y: y + 1, plane: "foreground" }, { y, plane: "background" },
+    ] as const) {
+      if (support.plane === "foreground" && this.world.generator.isBackgroundTrunk(x, support.y)) continue;
+      for (const item of this.world.naturalHarvestAt(x, support.y, support.plane)) {
+        if (!isPlantItem(item)) continue;
+        const id = `plant:${cellKey(x, support.y)}:${item}`;
+        if (!this.collectedPlants.has(id)) plants.push({ id, x, y, itemId: item });
+      }
+    }
+    return plants;
+  }
+
+  getPlantTarget(x: number, y: number): NaturalPlant | null {
+    if (!this.withinReach(x, y)) return null;
+    const plant = this.plantsAt(x, y)[0];
+    if (!plant) return null;
+    const visible = this.traceTarget(x, y, "foreground");
+    return visible.x === x && visible.y === y ? plant : null;
+  }
+
+  harvestPlant(x: number, y: number): ActionResult {
+    if (!this.withinReach(x, y)) return { ok: false, reason: "Cible hors de portée." };
+    const plant = this.getPlantTarget(x, y);
+    if (!plant) return { ok: false, reason: "Aucune plante accessible ici." };
+    if (this.collectedPlants.size >= MAX_EDITS) return { ok: false, reason: "Limite de plantes récoltées atteinte." };
+    if (availableItemSpace(this.inventory, plant.itemId, this.hotbar) === 0 &&
+        this.groundDrops.length >= MAX_GROUND_DROPS) {
+      return { ok: false, reason: "Inventaire et espace de dépôt pleins." };
+    }
+    if (addItems(this.inventory, plant.itemId, 1, this.hotbar) === 0) {
+      this.groundDrops.push({
+        id: crypto.randomUUID(), x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE,
+        itemId: plant.itemId, quantity: 1,
+      });
+    }
+    this.collectedPlants.add(plant.id);
+    return { ok: true };
+  }
+
   private finishMiningHit(destroyed: boolean): MiningResult {
     const stack = this.hotbar[this.selectedSlot];
     if (stack && isToolStack(stack)) {
@@ -405,7 +491,10 @@ export class GameSession {
 
   getMiningTarget(x: number, y: number): MiningTarget | null {
     if (!this.withinReach(x, y)) return null;
-    const plane = this.getMiningPlane(x, y);
+    return this.traceTarget(x, y, this.getMiningPlane(x, y));
+  }
+
+  private traceTarget(x: number, y: number, plane: ConstructionPlane): MiningTarget {
     const fromX = (this.player.x + PLAYER_WIDTH / 2) / TILE_SIZE;
     const fromY = (this.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
     const dx = x + 0.5 - fromX;
@@ -420,7 +509,7 @@ export class GameSession {
     let nextY = dy === 0 ? Infinity : ((stepY > 0 ? cellY + 1 : cellY) - fromY) / dy;
     const blocksRay = (cx: number, cy: number): boolean => {
       const block = this.world.getBlockOnPlane(cx, cy, plane);
-      return block !== Block.Air && (plane === "foreground" ||
+      return block !== Block.Air && !isLiquidBlock(block) && (plane === "foreground" ||
         (this.world.getBackgroundOrigin(cx, cy) !== "natural" && BLOCKS[block].durability !== null));
     };
 
@@ -454,6 +543,7 @@ export class GameSession {
     if (!target) return { ok: false, reason: "Cible hors de portée." };
     const { x, y, plane } = target;
     const block = this.world.getBlockOnPlane(x, y, plane);
+    if (isLiquidBlock(block)) return { ok: false, reason: "Les liquides ne peuvent pas être minés." };
     if (plane === "background" && this.world.getBackgroundOrigin(x, y) === "natural") {
       return { ok: false, silent: true };
     }
@@ -471,21 +561,30 @@ export class GameSession {
       return this.finishMiningHit(false);
     }
     const drop = BLOCKS[block].drop;
+    const harvests = this.world.naturalHarvestAt(x, y, plane).filter((item) => !isPlantItem(item));
+    const rewards = [...(drop ? [drop] : []), ...harvests];
     if (this.world.editCount >= MAX_EDITS && this.world.wouldAddEdit(x, y, Block.Air, 0, plane)) {
       return { ok: false, reason: "Limite du prototype atteinte : 100 000 blocs modifiés." };
     }
-    if (drop && availableItemSpace(this.inventory, drop, this.hotbar) === 0 &&
-        this.groundDrops.length >= MAX_GROUND_DROPS) {
+    const nextInventory = cloneInventory(this.inventory);
+    const nextHotbar = this.hotbar.map((stack) => stack ? { ...stack } : null);
+    const overflow = rewards.filter((item) => addItems(nextInventory, item, 1, nextHotbar) === 0);
+    if (this.groundDrops.length + overflow.length > MAX_GROUND_DROPS) {
       return { ok: false, reason: "Inventaire et espace de dépôt pleins." };
     }
     this.world.setBlockOnPlane(x, y, Block.Air, 0, plane);
     this.damage.delete(key);
-    if (drop && addItems(this.inventory, drop, 1, this.hotbar) === 0) {
+    Object.assign(this.inventory, nextInventory);
+    this.hotbar.forEach((stack, index) => {
+      const next = nextHotbar[index];
+      if (stack && next) stack.quantity = next.quantity;
+    });
+    for (const item of overflow) {
       this.groundDrops.push({
         id: crypto.randomUUID(),
         x: (x + 0.5) * TILE_SIZE,
         y: (y + 0.5) * TILE_SIZE,
-        itemId: drop,
+        itemId: item,
         quantity: 1,
       });
     }
@@ -498,7 +597,7 @@ export class GameSession {
     if (!stack) return { ok: false, reason: "L'emplacement sélectionné est vide." };
     if (isToolStack(stack)) return { ok: false, reason: "Les outils ne peuvent pas être posés comme blocs." };
     const plane = this.selectedPlane;
-    if (!canPlaceItemOnPlane(stack.itemId, plane)) {
+    if (!isBlockItem(stack.itemId) || !canPlaceItemOnPlane(stack.itemId, plane)) {
       return { ok: false, reason: `${ITEM_LABELS[stack.itemId]} ne peut pas être placé sur ce plan.` };
     }
     if (this.world.getBlockOnPlane(x, y, plane) !== Block.Air) {
@@ -518,10 +617,10 @@ export class GameSession {
     if (!supported) return { ok: false, reason: "Le bloc doit être accolé à un support." };
     const block = ITEM_BLOCKS[stack.itemId];
     if (this.world.editCount >= MAX_EDITS &&
-        this.world.wouldAddEdit(x, y, block, this.selectedRotation, plane)) {
+        this.world.wouldAddEdit(x, y, block, this.selectedRotation, plane, true)) {
       return { ok: false, reason: "Limite du prototype atteinte : 100 000 blocs modifiés." };
     }
-    this.world.setBlockOnPlane(x, y, block, this.selectedRotation, plane);
+    this.world.setBlockOnPlane(x, y, block, this.selectedRotation, plane, true);
     this.damage.delete(damageKey(x, y, plane));
     stack.quantity--;
     if (stack.quantity === 0) this.hotbar[this.selectedSlot] = null;
@@ -542,6 +641,8 @@ export class GameSession {
       edits: this.world.edits,
       backgroundEdits: this.world.backgroundEdits,
       groundDrops: this.groundDrops.map((drop) => ({ ...drop })),
+      collectedNaturalPickups: [...this.collectedNaturalPickups].sort(),
+      collectedPlants: [...this.collectedPlants].sort(),
       blockDamage: Array.from(this.damage.values(), (entry) => ({ ...entry })),
       creativeMode: this.creative,
       lightingQuality: this.lightingQuality,

@@ -10,8 +10,8 @@ describe("shortcut stacks", () => {
     const session = GameSession.create("Test", "hotbar", 1000);
     expect(session.hotbar).toHaveLength(HOTBAR_SLOT_COUNT);
     expect(session.hotbar.filter((stack) => stack === null)).toHaveLength(6);
-    expect(session.selectedItem).toBe("wood");
-    expect(session.totalItems("wood")).toBe(24);
+    expect(session.selectedItem).toBe("pine_log");
+    expect(session.totalItems("pine_log")).toBe(24);
   });
 
   it("moves an inventory stack and returns the displaced stack without losing resources", () => {
@@ -20,9 +20,9 @@ describe("shortcut stacks", () => {
     expect(session.moveInventoryToHotbar(0, 2)).toEqual({ ok: true });
     expect(session.hotbar[2]).toEqual({ itemId: "stone", quantity: 99 });
     expect(session.inventory.stone).toBe(21);
-    expect(session.inventory.wood).toBe(24);
+    expect(session.inventory.pine_log).toBe(24);
     expect(session.totalItems("stone")).toBe(120);
-    expect(session.totalItems("wood")).toBe(24);
+    expect(session.totalItems("pine_log")).toBe(24);
 
     expect(session.moveHotbarToInventory(2)).toEqual({ ok: true });
     expect(session.hotbar[2]).toBeNull();
@@ -33,7 +33,7 @@ describe("shortcut stacks", () => {
   it("does not partially move a shortcut stack into a full inventory", () => {
     const session = GameSession.create("Test", "hotbar", 1000);
     session.inventory.dirt = 99 * 23;
-    session.inventory.wood = 98;
+    session.inventory.pine_log = 98;
     const before = session.snapshot(2000);
     expect(session.moveHotbarToInventory(2)).toMatchObject({ ok: false });
     expect(session.snapshot(2000)).toEqual(before);
@@ -47,7 +47,7 @@ describe("shortcut stacks", () => {
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     expect(restored.selectedSlot).toBe(2);
     expect(restored.selectedItem).toBeNull();
-    expect(restored.hotbar[9]).toEqual({ itemId: "wood", quantity: 24 });
+    expect(restored.hotbar[9]).toEqual({ itemId: "pine_log", quantity: 24 });
     expect(restored.selectHotbar(10).ok).toBe(false);
     expect(restored.swapHotbar(-1, 0).ok).toBe(false);
     expect(restored.moveInventoryToHotbar(24, 0).ok).toBe(false);
@@ -79,7 +79,7 @@ describe("shortcut stacks", () => {
     expect(session.inventory.stone).toBe(1);
     expect(session.dropStack({ area: "hotbar", index: 0 })).toEqual({ ok: true });
     expect(session.hotbar[0]?.quantity).toBe(11);
-    expect(session.hotbar[2]).toEqual({ itemId: "wood", quantity: 24 });
+    expect(session.hotbar[2]).toEqual({ itemId: "pine_log", quantity: 24 });
     expect(session.selectedSlot).toBe(2);
     expect(session.groundDrops.map(({ itemId, quantity }) => ({ itemId, quantity }))).toEqual([
       { itemId: "stone", quantity: 1 }, { itemId: "dirt", quantity: 1 },
@@ -95,7 +95,7 @@ describe("shortcut stacks", () => {
     expect(session.dropStack({ area: "inventory", index: 1 })).toEqual({ ok: true });
     expect(session.inventory.tools).toEqual([{ itemId: "stonePickaxe", quantity: 1, durability: 50 }]);
     expect(session.groundDrops[0]).toMatchObject({ itemId: "stonePickaxe", quantity: 1, durability: 317 });
-    expect(session.selectedItem).toBe("wood");
+    expect(session.selectedItem).toBe("pine_log");
   });
 
   it("rejects invalid or blocked deposits without removing items", () => {
@@ -116,38 +116,38 @@ describe("shortcut stacks", () => {
     [20, 30, 50, 0], [90, 99, 99, 90], [99, 12, 99, 12],
   ])("merges inventory into a matching shortcut (%s + %s)", (target, source, merged, overflow) => {
     const session = GameSession.create("Test", "merge", 1000);
-    session.hotbar[2] = { itemId: "wood", quantity: target, rotation: 90 };
-    session.inventory.wood = source;
-    const total = session.totalItems("wood");
+    session.hotbar[2] = { itemId: "pine_log", quantity: target, rotation: 90 };
+    session.inventory.pine_log = source;
+    const total = session.totalItems("pine_log");
     expect(session.moveInventoryToHotbar(0, 2)).toEqual({ ok: true });
-    expect(session.hotbar[2]).toEqual({ itemId: "wood", quantity: merged, rotation: 90 });
-    expect(session.inventory.wood).toBe(overflow);
-    expect(session.totalItems("wood")).toBe(total);
+    expect(session.hotbar[2]).toEqual({ itemId: "pine_log", quantity: merged, rotation: 90 });
+    expect(session.inventory.pine_log).toBe(overflow);
+    expect(session.totalItems("pine_log")).toBe(total);
   });
 
   it.each([
     [20, 30, 50, 0], [90, 99, 99, 90], [99, 12, 99, 12],
   ])("merges two matching shortcuts (%s + %s), returning the overflow", (target, source, merged, overflow) => {
     const session = GameSession.create("Test", "merge", 1000);
-    session.hotbar[2] = { itemId: "wood", quantity: target, rotation: 270 };
-    session.hotbar[8] = { itemId: "wood", quantity: source, rotation: 90 };
-    const total = session.totalItems("wood");
+    session.hotbar[2] = { itemId: "pine_log", quantity: target, rotation: 270 };
+    session.hotbar[8] = { itemId: "pine_log", quantity: source, rotation: 90 };
+    const total = session.totalItems("pine_log");
     expect(session.swapHotbar(8, 2)).toEqual({ ok: true });
     expect(session.hotbar[8]).toBeNull();
-    expect(session.hotbar[2]).toEqual({ itemId: "wood", quantity: merged, rotation: 270 });
-    expect(session.inventory.wood).toBe(overflow);
-    expect(session.totalItems("wood")).toBe(total);
+    expect(session.hotbar[2]).toEqual({ itemId: "pine_log", quantity: merged, rotation: 270 });
+    expect(session.inventory.pine_log).toBe(overflow);
+    expect(session.totalItems("pine_log")).toBe(total);
   });
 
   it("rejects a merge atomically if its overflow cannot fit, but allows a merge without overflow", () => {
     const session = GameSession.create("Test", "merge", 1000);
     session.inventory.dirt = 24 * 99;
-    session.hotbar[2] = { itemId: "wood", quantity: 90, rotation: 180 };
-    session.hotbar[8] = { itemId: "wood", quantity: 20 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 90, rotation: 180 };
+    session.hotbar[8] = { itemId: "pine_log", quantity: 20 };
     const before = session.snapshot(2000);
     expect(session.swapHotbar(8, 2)).toMatchObject({ ok: false, reason: expect.stringContaining("surplus") });
     expect(session.snapshot(2000)).toEqual(before);
-    session.hotbar[8] = { itemId: "wood", quantity: 9 };
+    session.hotbar[8] = { itemId: "pine_log", quantity: 9 };
     expect(session.swapHotbar(8, 2)).toEqual({ ok: true });
     expect(session.hotbar[2]?.quantity).toBe(99);
     expect(session.hotbar[8]).toBeNull();
@@ -160,9 +160,9 @@ describe("shortcut stacks", () => {
     session.rotateSelected(1);
     session.swapHotbar(2, 9);
     expect(session.hotbar[9]?.rotation).toBe(90);
-    session.inventory.wood = 98;
+    session.inventory.pine_log = 98;
     expect(session.moveHotbarToInventory(9)).toEqual({ ok: true });
     expect(session.hotbar[9]).toBeNull();
-    expect(session.inventory.wood).toBe(122);
+    expect(session.inventory.pine_log).toBe(122);
   });
 });

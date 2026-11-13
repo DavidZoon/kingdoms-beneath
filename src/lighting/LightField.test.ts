@@ -159,7 +159,7 @@ describe("cellular light and occlusion", () => {
     const movingField = withLightSources(world, base, [moved]);
     expect(sampleLight(movingField, 8, 12).torch).toBe(0);
     expect(sampleLight(movingField, 20, 12).torch).toBe(1);
-    expect(carriedTorchSource(player, "wood")).toBeNull();
+    expect(carriedTorchSource(player, "pine_log")).toBeNull();
     expect(sampleLight(withLightSources(world, base, []), 20, 12).torch).toBe(0);
   });
 

@@ -92,7 +92,7 @@ describe("deterministic terrain", () => {
     world.setBackground(x, y, Block.Air);
     expect(world.getBackgroundOrigin(x, y)).toBe("empty");
     expect(world.backgroundEdits).toEqual([{ x, y, block: Block.Air }]);
-    world.setBackground(x, y, Block.Wood, 90);
+    world.setBackground(x, y, Block.PineLog, 90);
     expect(world.getBackgroundOrigin(x, y)).toBe("placed");
     expect(world.getBackgroundRotation(x, y)).toBe(90);
     world.setBackground(x, y, Block.Air);

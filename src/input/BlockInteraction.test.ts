@@ -3,10 +3,24 @@ import { BLOCK_ITEMS, TOOL_ITEMS } from "../world/blocks";
 import { BlockInteraction, blockActionFor } from "./BlockInteraction";
 
 describe("selection-based block interaction", () => {
+  it.each([null, "dirt", "stonePickaxe"] as const)("harvests plants with selection %s on a held mouse or touch gesture, never on a tap", (item) => {
+    expect(blockActionFor(item, true)).toBe("harvest");
+    for (const touch of [false, true]) {
+      const input = new BlockInteraction();
+      input.press(1, touch, "plant", blockActionFor(item, true));
+      expect(input.heldAction("plant")).toBe("harvest");
+      input.release(1);
+      expect(input.heldAction("plant")).toBeNull();
+      expect(input.consumePlacement("plant")).toBe(false);
+    }
+  });
+
   it("mines with an empty shortcut and places every current buildable item", () => {
     expect(blockActionFor(null)).toBe("mine");
     for (const item of BLOCK_ITEMS) expect(blockActionFor(item)).toBe("place");
     for (const item of TOOL_ITEMS) expect(blockActionFor(item)).toBe("mine");
+    expect(blockActionFor("fur")).toBe("mine");
+    expect(blockActionFor("cotton_plant")).toBe("mine");
   });
 
   it("mines while holding a mouse or touch pointer and stops on release", () => {
@@ -22,24 +36,24 @@ describe("selection-based block interaction", () => {
 
   it("places on a touch tap, including the pointerleave following pointerup", () => {
     const input = new BlockInteraction();
-    input.press(1, true, "wood", "place");
-    expect(input.heldAction("wood")).toBeNull();
+    input.press(1, true, "pine_log", "place");
+    expect(input.heldAction("pine_log")).toBeNull();
     input.release(1);
     input.cancel(1);
-    expect(input.consumePlacement("wood")).toBe(true);
-    expect(input.consumePlacement("wood")).toBe(false);
+    expect(input.consumePlacement("pine_log")).toBe(true);
+    expect(input.consumePlacement("pine_log")).toBe(false);
   });
 
   it("preserves a mouse click shorter than a render frame without duplicating a held placement", () => {
     const input = new BlockInteraction();
-    input.press(1, false, "wood", "place");
+    input.press(1, false, "pine_log", "place");
     input.release(1);
-    expect(input.consumePlacement("wood")).toBe(true);
-    input.press(2, false, "wood", "place");
-    expect(input.heldAction("wood")).toBe("place");
+    expect(input.consumePlacement("pine_log")).toBe(true);
+    input.press(2, false, "pine_log", "place");
+    expect(input.heldAction("pine_log")).toBe("place");
     input.recordPlacement();
     input.release(2);
-    expect(input.consumePlacement("wood")).toBe(false);
+    expect(input.consumePlacement("pine_log")).toBe(false);
   });
 
   it("cancels the whole pinch gesture until all fingers have been released", () => {
@@ -59,28 +73,28 @@ describe("selection-based block interaction", () => {
 
   it("does not start mining when the last material is placed or the selected shortcut changes", () => {
     const input = new BlockInteraction();
-    input.press(1, false, "2:wood", "place");
-    expect(input.heldAction("2:wood")).toBe("place");
+    input.press(1, false, "2:pine_log", "place");
+    expect(input.heldAction("2:pine_log")).toBe("place");
     input.recordPlacement();
     expect(input.heldAction("2:empty")).toBeNull();
     input.release(1);
     expect(input.consumePlacement("2:empty")).toBe(false);
-    input.press(2, true, "2:wood", "place");
+    input.press(2, true, "2:pine_log", "place");
     input.release(2);
-    expect(input.consumePlacement("3:wood")).toBe(false);
+    expect(input.consumePlacement("3:pine_log")).toBe(false);
   });
 
   it("discards cancelled gestures and pending taps when a panel or pause interrupts play", () => {
     const input = new BlockInteraction();
-    input.press(1, true, "wood", "place");
+    input.press(1, true, "pine_log", "place");
     input.cancel(1);
     input.release(1);
-    expect(input.consumePlacement("wood")).toBe(false);
-    input.press(2, true, "wood", "place");
+    expect(input.consumePlacement("pine_log")).toBe(false);
+    input.press(2, true, "pine_log", "place");
     input.release(2);
     input.reset();
-    expect(input.consumePlacement("wood")).toBe(false);
-    expect(input.heldAction("wood")).toBeNull();
+    expect(input.consumePlacement("pine_log")).toBe(false);
+    expect(input.heldAction("pine_log")).toBeNull();
   });
 
   it("does not interrupt a world gesture when a movement-control pointer is released", () => {

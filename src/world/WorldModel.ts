@@ -1,4 +1,5 @@
 import { WorldGenerator, type GeneratorVersion } from "../generation/WorldGenerator";
+import type { ResourceId } from "./resources";
 import {
   Block, CHUNK_SIZE, MAX_TILE_X, WORLD_HEIGHT, isRotation,
   type BlockId, type ConstructionPlane, type Rotation,
@@ -72,11 +73,18 @@ export class WorldModel {
     return plane === "foreground" ? this.getBlock(x, y) : this.getBackground(x, y);
   }
 
+  naturalHarvestAt(x: number, y: number, plane: ConstructionPlane): readonly ResourceId[] {
+    const overrides = plane === "foreground" ? this.overrides : this.backgroundOverrides;
+    if (overrides.has(cellKey(x, y))) return [];
+    if (plane === "background" && !this.generator.isBackgroundTrunk(x, y)) return [];
+    return this.generator.harvestAt(x, y);
+  }
+
   getRotationOnPlane(x: number, y: number, plane: ConstructionPlane): Rotation {
     return plane === "foreground" ? this.getRotation(x, y) : this.getBackgroundRotation(x, y);
   }
 
-  setBlock(x: number, y: number, block: BlockId, rotation: Rotation = 0): void {
+  setBlock(x: number, y: number, block: BlockId, rotation: Rotation = 0, placed = false): void {
     if (!Number.isInteger(x) || !Number.isInteger(y) || Math.abs(x) > MAX_TILE_X ||
         y < 0 || y >= WORLD_HEIGHT - 1 || block === Block.Bedrock || !isRotation(rotation) ||
         (block === Block.Air && rotation !== 0)) {
@@ -84,7 +92,7 @@ export class WorldModel {
     }
     const changed = this.getBlock(x, y) !== block || this.getRotation(x, y) !== rotation;
     const key = cellKey(x, y);
-    if (block === this.generator.blockAt(x, y) && rotation === 0) {
+    if (!placed && block === this.generator.blockAt(x, y) && rotation === 0) {
       this.overrides.delete(key);
     } else {
       this.overrides.set(key, { x, y, block, ...(rotation !== 0 ? { rotation } : {}) });
@@ -126,15 +134,15 @@ export class WorldModel {
         previousOrigin !== this.getBackgroundOrigin(x, y)) this.version++;
   }
 
-  setBlockOnPlane(x: number, y: number, block: BlockId, rotation: Rotation, plane: ConstructionPlane): void {
-    if (plane === "foreground") this.setBlock(x, y, block, rotation);
+  setBlockOnPlane(x: number, y: number, block: BlockId, rotation: Rotation, plane: ConstructionPlane, placed = false): void {
+    if (plane === "foreground") this.setBlock(x, y, block, rotation, placed);
     else this.setBackground(x, y, block, rotation);
   }
 
-  wouldAddEdit(x: number, y: number, block: BlockId, rotation: Rotation, plane: ConstructionPlane): boolean {
+  wouldAddEdit(x: number, y: number, block: BlockId, rotation: Rotation, plane: ConstructionPlane, placed = false): boolean {
     const key = cellKey(x, y);
     if (plane === "foreground") {
-      return !this.overrides.has(key) && (block !== this.generator.blockAt(x, y) || rotation !== 0);
+      return !this.overrides.has(key) && (placed || block !== this.generator.blockAt(x, y) || rotation !== 0);
     }
     return !this.backgroundOverrides.has(key) &&
       (block !== Block.Air || this.generator.isBackgroundTrunk(x, y));

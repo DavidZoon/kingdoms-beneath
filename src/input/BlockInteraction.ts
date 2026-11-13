@@ -1,9 +1,10 @@
-import { isToolItem, type ItemId } from "../world/blocks";
+import { isBlockItem, type ItemId } from "../world/blocks";
 
-export type BlockAction = "mine" | "place";
+export type BlockAction = "mine" | "place" | "harvest";
 
-export function blockActionFor(item: ItemId | null): BlockAction {
-  return item === null || isToolItem(item) ? "mine" : "place";
+export function blockActionFor(item: ItemId | null, plant = false): BlockAction {
+  if (plant) return "harvest";
+  return item !== null && isBlockItem(item) ? "place" : "mine";
 }
 
 interface Gesture {

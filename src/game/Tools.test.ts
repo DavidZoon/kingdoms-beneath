@@ -148,13 +148,13 @@ describe("non-stackable tools and stone pickaxes", () => {
     expect(session.inventory.tools).toEqual([]);
   });
 
-  it("crafts individual full-durability tools using wood and stone from either storage", () => {
+  it("crafts individual full-durability tools using pine_log and stone from either storage", () => {
     const session = sessionWithTool(300);
-    session.hotbar[0] = { itemId: "wood", quantity: 1 };
+    session.hotbar[0] = { itemId: "pine_log", quantity: 1 };
     session.hotbar[1] = { itemId: "stone", quantity: 2 };
-    session.inventory.wood = 1;
+    session.inventory.pine_log = 1;
     expect(session.startCraft("stonePickaxe", 2)).toEqual({ ok: true });
-    expect(session.totalItems("wood")).toBe(0);
+    expect(session.totalItems("pine_log")).toBe(0);
     expect(session.totalItems("stone")).toBe(0);
     for (let tick = 0; tick < RECIPES.stonePickaxe.ticksPerItem; tick++) session.step(idle);
     expect(session.inventory.tools).toEqual([pickaxe()]);
@@ -168,7 +168,7 @@ describe("non-stackable tools and stone pickaxes", () => {
 
   it("rejects crafting when materials or one slot per tool are missing", () => {
     const session = sessionWithTool();
-    session.inventory.wood = 1;
+    session.inventory.pine_log = 1;
     expect(session.startCraft("stonePickaxe", 1).ok).toBe(false);
     session.inventory.stone = 1;
     session.inventory.dirt = 99 * 24 - 1;
@@ -188,11 +188,13 @@ describe("non-stackable tools and stone pickaxes", () => {
   });
 
   it("migrates v7 storage without losing the world and enables the tools category", () => {
-    const save = sessionWithTool().snapshot(2000);
+    const save = GameSession.create("Outils", "two-layers", 1000).snapshot(2000);
+    save.edits.push({ x: 20, y: 20, block: Block.Stone });
+    save.backgroundEdits.push({ x: 21, y: 20, block: Block.PineLog });
     save.hotbar[2] = null;
     const { tools: _tools, ...inventory } = save.inventory;
-    const migrated = validateSave({ ...save, schemaVersion: 7, inventory });
-    expect(migrated.schemaVersion).toBe(8);
+    const migrated = validateSave({ ...save, schemaVersion: 7, generatorVersion: 3, inventory });
+    expect(migrated.schemaVersion).toBe(10);
     expect(migrated.inventory.tools).toEqual([]);
     expect(migrated.edits).toEqual(save.edits);
     expect(migrated.backgroundEdits).toEqual(save.backgroundEdits);
@@ -215,7 +217,7 @@ describe("non-stackable tools and stone pickaxes", () => {
     const save = sessionWithTool().snapshot(2000);
     expect(() => validateSave({ ...save, schemaVersion: 7 })).toThrow();
     expect(() => validateSave({
-      ...save, inventory: { ...save.inventory, tools: [{ itemId: "wood", quantity: 1 }] },
+      ...save, inventory: { ...save.inventory, tools: [{ itemId: "pine_log", quantity: 1 }] },
     })).toThrow();
     expect(() => validateSave({
       ...save, inventory: { ...save.inventory, tools: Array.from({ length: 25 }, () => pickaxe()) },

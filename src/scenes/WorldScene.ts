@@ -10,17 +10,18 @@ import {
 import { daylightAt } from "../lighting/WorldClock";
 import { getCrackSegments } from "../rendering/blockCracks";
 import { darkenBackgroundPixels } from "../rendering/backgroundTint";
-import { drawBlockTexture } from "../rendering/blockTextures";
+import { drawBlockTexture, drawItemTexture } from "../rendering/blockTextures";
 import { cameraFollowY, type VerticalBounds } from "../rendering/camera";
 import {
   backdropSurfaceY, foregroundPlantPosition, FOREGROUND_PLANT_SPACING, FOREGROUND_SCROLL_FACTOR,
 } from "../rendering/parallax";
 import { PLAYER_HEIGHT, PLAYER_WIDTH } from "../player/PlayerController";
 import {
-  Block, BLOCKS, BLOCK_ITEMS, CHUNK_SIZE, ITEM_BLOCKS, ITEM_LABELS, TILE_ART_SIZE, TILE_SIZE, TOOLS, WORLD_HEIGHT,
+  Block, BLOCKS, MATERIAL_ITEMS, CHUNK_SIZE, ITEM_LABELS, TILE_ART_SIZE, TILE_SIZE, TOOLS, WORLD_HEIGHT,
   type BlockId, type ConstructionPlane,
 } from "../world/blocks";
 import { cellKey, chunkOf } from "../world/WorldModel";
+import { isPlantItem } from "../world/resources";
 
 export interface WorldCallbacks {
   onHud: () => void;
@@ -103,7 +104,7 @@ export class WorldScene extends Phaser.Scene {
       this.actionCooldown = 0;
       this.blockInteraction.press(
         event.pointerId, event.pointerType === "touch", this.selectionKey(),
-        blockActionFor(this.session.selectedItem),
+        blockActionFor(this.session.selectedItem, this.session.getPlantTarget(this.target.x, this.target.y) !== null),
       );
     };
     this.game.canvas.addEventListener("pointermove", point);
@@ -190,15 +191,25 @@ export class WorldScene extends Phaser.Scene {
       ? this.blockInteraction.heldAction(selection) : null;
     const tapPlacement = this.blockInteraction.consumePlacement(selection);
     const { x, y } = this.target;
+    const plantCell = this.session.getPlantTarget(x, y);
     const miningCell = blockActionFor(this.session.selectedItem) === "mine"
       ? this.session.getMiningTarget(x, y) : null;
-    const miningTarget = action === "mine"
+    const miningTarget = action === "harvest"
+      ? plantCell ? `${cellKey(x, y)}:${selection}:${plantCell.id}` : null
+      : action === "mine"
       ? `${cellKey(x, y)}:${selection}:${miningCell
         ? `${cellKey(miningCell.x, miningCell.y)}:${miningCell.plane}:${this.session.world.getBlockOnPlane(miningCell.x, miningCell.y, miningCell.plane)}`
         : "unreachable"}`
       : null;
     const miningTicks = this.miningHold.advance(delta, miningTarget);
     for (let tick = 0; tick < miningTicks; tick++) {
+      if (action === "harvest" && plantCell) {
+        const result = this.session.harvestPlant(x, y);
+        this.callbacks.onAction(result.ok ? `Cueillette : ${ITEM_LABELS[plantCell.itemId]}.` : result.reason);
+        if (result.ok) this.callbacks.onHud();
+        this.miningHold.reset();
+        break;
+      }
       if (!miningCell) {
         this.callbacks.onAction("Cible hors de portée.");
         this.miningHold.reset();
@@ -238,7 +249,7 @@ export class WorldScene extends Phaser.Scene {
     this.actor.setPosition(player.x, player.y);
     if (player.vx !== 0) this.actor.setFlipX(player.vx < 0);
     this.updateCameraAndChunks();
-    const selectionTarget = miningCell ?? this.target;
+    const selectionTarget = plantCell ?? miningCell ?? this.target;
     this.selection.clear().lineStyle(1, this.session.withinReach(this.target.x, this.target.y) ? 0xf6e5ad : 0xc76852);
     this.selection.strokeRect(selectionTarget.x * TILE_SIZE, selectionTarget.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     this.hudElapsed += elapsed;
@@ -304,27 +315,50 @@ export class WorldScene extends Phaser.Scene {
 
   private createDropTextures(): void {
     if (!this.textures.exists("drop-stonePickaxe")) throw new Error("Impossible de charger l'icône de la pioche.");
-    for (const item of BLOCK_ITEMS) {
+    for (const item of MATERIAL_ITEMS) {
       const texture = this.textures.createCanvas(`drop-${item}`, TILE_ART_SIZE, TILE_ART_SIZE);
       if (!texture) throw new Error(`Impossible de créer l'icône de ${ITEM_LABELS[item]}.`);
-      drawBlockTexture(texture.context, ITEM_BLOCKS[item]);
+      drawItemTexture(texture.context, item);
       texture.refresh();
     }
   }
 
   private syncGroundDrops(): void {
     this.dropDurability.clear();
-    const active = new Set(this.session.groundDrops.map((drop) => drop.id));
+    const view = this.cameras.main.worldView;
+    const drops = [...this.session.groundDrops, ...this.session.naturalPickups(
+      Math.floor(view.left / TILE_SIZE), Math.ceil(view.right / TILE_SIZE),
+      Math.floor(view.top / TILE_SIZE), Math.ceil(view.bottom / TILE_SIZE),
+    )];
+    if (this.session.world.generator.version >= 4) {
+      for (let x = Math.floor(view.left / TILE_SIZE); x <= Math.ceil(view.right / TILE_SIZE); x++) {
+        for (let y = Math.max(0, Math.floor(view.top / TILE_SIZE)); y <= Math.min(WORLD_HEIGHT - 2, Math.ceil(view.bottom / TILE_SIZE)); y++) {
+          for (const plant of this.session.plantsAt(x, y)) {
+            drops.push({ id: plant.id, x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE,
+              itemId: plant.itemId, quantity: 1 });
+          }
+          const plane = this.session.world.generator.isBackgroundTrunk(x, y) ? "background" : "foreground";
+          for (const item of this.session.world.naturalHarvestAt(x, y, plane)) {
+            if (isPlantItem(item)) continue;
+            drops.push({ id: `harvest:${x},${y}:${item}`, x: (x + 0.5) * TILE_SIZE,
+              y: (y + (plane === "background" ? 0.5 : -0.5)) * TILE_SIZE, itemId: item, quantity: 1 });
+          }
+        }
+      }
+    }
+    const active = new Set(drops.map((drop) => drop.id));
     for (const [id, image] of this.groundDrops) {
       if (!active.has(id)) {
         image.destroy();
         this.groundDrops.delete(id);
       }
     }
-    for (const drop of this.session.groundDrops) {
+    for (const drop of drops) {
       let image = this.groundDrops.get(drop.id);
       if (!image) {
-        image = this.add.image(drop.x, drop.y, `drop-${drop.itemId}`).setDisplaySize(TILE_ART_SIZE, TILE_ART_SIZE).setDepth(3);
+        const harvest = drop.id.startsWith("harvest:") || drop.id.startsWith("plant:");
+        const size = harvest ? TILE_SIZE : TILE_ART_SIZE;
+        image = this.add.image(drop.x, drop.y, `drop-${drop.itemId}`).setDisplaySize(size, size).setDepth(harvest ? 1 : 3);
         this.groundDrops.set(drop.id, image);
       }
       image.setPosition(drop.x, drop.y);
@@ -573,7 +607,7 @@ export class WorldScene extends Phaser.Scene {
         const worldY = cy * CHUNK_SIZE + y;
         const rotation = this.session.world.getRotationOnPlane(worldX, worldY, plane);
         const atlas = plane === "background" &&
-          !(block === Block.Wood && this.session.world.getBackgroundOrigin(worldX, worldY) === "trunk")
+          !(block === Block.PineLog && this.session.world.getBackgroundOrigin(worldX, worldY) === "trunk")
           ? this.backgroundAtlas : this.tileAtlas;
         ctx.save();
         ctx.translate((x + 0.5) * TILE_ART_SIZE, (y + 0.5) * TILE_ART_SIZE);

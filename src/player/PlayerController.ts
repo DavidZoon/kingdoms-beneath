@@ -1,10 +1,13 @@
-import { BLOCKS, Block, MAX_TILE_X, TILE_SIZE, isStairBlock } from "../world/blocks";
+import { BLOCKS, Block, MAX_TILE_X, TILE_SIZE, isLiquidBlock, isStairBlock } from "../world/blocks";
 import type { WorldModel } from "../world/WorldModel";
 
 export const PLAYER_WIDTH = 12;
 export const PLAYER_HEIGHT = 26;
 const STAIR_STEP = TILE_SIZE / 4;
 const COLLISION_EPSILON = 0.001;
+const SWIM_SPEED = 70;
+const JUMP_SPEED = 245;
+const GRAVITY = 680;
 
 interface CollisionRect {
   left: number;
@@ -84,6 +87,28 @@ export function playerOverlapsSolid(world: WorldModel, player: PlayerState): boo
   return overlappingSolids(world, player).length > 0;
 }
 
+export function playerInLiquid(world: WorldModel, player: PlayerState): boolean {
+  return liquidSurface(world, player) !== null;
+}
+
+function liquidSurface(world: WorldModel, player: PlayerState): number | null {
+  const left = Math.floor(player.x / TILE_SIZE);
+  const right = Math.floor((player.x + PLAYER_WIDTH - COLLISION_EPSILON) / TILE_SIZE);
+  const top = Math.floor(player.y / TILE_SIZE);
+  const bottom = Math.floor((player.y + PLAYER_HEIGHT - COLLISION_EPSILON) / TILE_SIZE);
+  let surface: number | null = null;
+  for (let x = left; x <= right; x++) {
+    for (let y = top; y <= bottom; y++) {
+      if (!isLiquidBlock(world.getBlock(x, y))) continue;
+      let surfaceRow = y;
+      while (surfaceRow > 0 && isLiquidBlock(world.getBlock(x, surfaceRow - 1))) surfaceRow--;
+      surface = Math.min(surface ?? Infinity, surfaceRow * TILE_SIZE);
+      break;
+    }
+  }
+  return surface;
+}
+
 function supportBelow(world: WorldModel, player: PlayerState, maxDrop: number): CollisionRect[] {
   const feet = player.y + PLAYER_HEIGHT;
   const left = Math.floor(player.x / TILE_SIZE);
@@ -107,22 +132,29 @@ function supportBelow(world: WorldModel, player: PlayerState, maxDrop: number): 
 export function stepPlayer(world: WorldModel, player: PlayerState, input: MovementInput): void {
   const dt = 1 / 60;
   const wasGrounded = player.grounded;
+  const surface = liquidSurface(world, player);
+  const swimming = surface !== null;
+  const jumpingInLiquid = swimming && (input.jump || player.vy < -SWIM_SPEED);
   const wasOnStair = wasGrounded && supportBelow(world, player, 0).some((rect) => rect.stair);
   player.vx = (Number(input.right) - Number(input.left)) * (input.run ? 135 : 85);
-  if (input.jump && player.grounded) player.vy = -245;
+  if (input.jump && (swimming || player.grounded)) player.vy = -JUMP_SPEED;
   const verticalInput = input.up || input.down;
-  player.climbing = !input.jump && (player.climbing || verticalInput) &&
+  player.climbing = !swimming && !input.jump && (player.climbing || verticalInput) &&
     isNearLadder(world, player, !verticalInput);
-  if (player.climbing) {
+  if (jumpingInLiquid || (surface !== null && player.y + PLAYER_HEIGHT / 2 < surface)) {
+    player.vy = Math.min(400, player.vy + GRAVITY * dt);
+  } else if (swimming) {
+    player.vy = (Number(input.down) - Number(input.up)) * SWIM_SPEED;
+  } else if (player.climbing) {
     player.vy = (Number(input.down) - Number(input.up)) * 70;
   } else {
-    player.vy = Math.min(400, player.vy + 680 * dt);
+    player.vy = Math.min(400, player.vy + GRAVITY * dt);
   }
 
   player.x += player.vx * dt;
   player.x = Math.max(-MAX_TILE_X * TILE_SIZE, Math.min(MAX_TILE_X * TILE_SIZE - PLAYER_WIDTH, player.x));
   let horizontal = overlappingSolids(world, player);
-  if (horizontal.length > 0 && wasGrounded && !player.climbing && player.vy >= 0 &&
+  if (horizontal.length > 0 && wasGrounded && !swimming && !player.climbing && player.vy >= 0 &&
       horizontal.every((rect) => rect.stair)) {
     const steppedY = Math.min(...horizontal.map((rect) => rect.top)) - PLAYER_HEIGHT;
     const rise = player.y - steppedY;
@@ -137,7 +169,7 @@ export function stepPlayer(world: WorldModel, player: PlayerState, input: Moveme
     if (player.vx < 0) player.x = Math.max(player.x, ...horizontal.map((rect) => rect.right));
     player.vx = 0;
   }
-  if (wasGrounded && !player.climbing && player.vy >= 0) {
+  if (wasGrounded && !swimming && !player.climbing && player.vy >= 0) {
     const supports = supportBelow(world, player, STAIR_STEP)
       .filter((rect) => rect.stair || wasOnStair)
       .sort((a, b) => a.top - b.top);
@@ -151,6 +183,13 @@ export function stepPlayer(world: WorldModel, player: PlayerState, input: Moveme
   }
 
   player.y = Math.max(0, player.y + player.vy * dt);
+  if (swimming && !jumpingInLiquid && player.vy < 0) {
+    const nextSurface = liquidSurface(world, player);
+    if (nextSurface !== null && player.y < nextSurface - PLAYER_HEIGHT / 2) {
+      player.y = nextSurface - PLAYER_HEIGHT / 2;
+      player.vy = 0;
+    }
+  }
   player.grounded = false;
   const vertical = overlappingSolids(world, player);
   if (vertical.length > 0) {

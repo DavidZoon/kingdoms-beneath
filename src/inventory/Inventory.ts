@@ -1,4 +1,4 @@
-import { BLOCK_ITEMS, isToolItem, TOOLS, type Inventory, type ItemId, type BlockItemId, type Rotation, type ToolStack } from "../world/blocks";
+import { MATERIAL_ITEMS, isToolItem, TOOLS, type Inventory, type ItemId, type MaterialItemId, type Rotation, type ToolStack } from "../world/blocks";
 
 export const STACK_SIZE = 99;
 export const INVENTORY_SLOT_COUNT = 24;
@@ -6,7 +6,7 @@ export const HOTBAR_SLOT_COUNT = 10;
 export const ITEM_CAPACITY = STACK_SIZE * INVENTORY_SLOT_COUNT;
 
 export interface MaterialStack {
-  itemId: BlockItemId;
+  itemId: MaterialItemId;
   quantity: number;
   rotation?: Rotation;
   durability?: never;
@@ -19,7 +19,7 @@ export function isToolStack(stack: ItemStack): stack is ToolStack {
 }
 
 export function emptyInventory(): Inventory {
-  return { dirt: 0, stone: 0, wood: 0, ladder: 0, torch: 0, woodStairs: 0, stoneStairs: 0, tools: [] };
+  return { ...Object.fromEntries(MATERIAL_ITEMS.map((item) => [item, 0])) as Record<MaterialItemId, number>, tools: [] };
 }
 
 export function cloneInventory(inventory: Inventory): Inventory {
@@ -27,7 +27,7 @@ export function cloneInventory(inventory: Inventory): Inventory {
 }
 
 export function getStacks(inventory: Inventory): ItemStack[] {
-  const materials = BLOCK_ITEMS.flatMap((itemId) => {
+  const materials = MATERIAL_ITEMS.flatMap((itemId) => {
     const stacks: ItemStack[] = [];
     for (let remaining = inventory[itemId]; remaining > 0; remaining -= STACK_SIZE) {
       stacks.push({ itemId, quantity: Math.min(remaining, STACK_SIZE) });

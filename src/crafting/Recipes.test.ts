@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../game/GameSession";
 import { parseSave, serializeSave } from "../save/schema";
-import type { BlockItemId } from "../world/blocks";
+import type { MaterialItemId } from "../world/blocks";
 import { clampCraftQuantity, MAX_CRAFT_QUANTITY, RECIPES, requiredMaterials, type RecipeId } from "./Recipes";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
@@ -12,9 +12,9 @@ function advance(session: GameSession, ticks: number): void {
 
 describe("progressive crafting", () => {
   it.each([
-    ["torch", "wood", 2],
-    ["ladder", "wood", 1],
-    ["woodStairs", "wood", 2],
+    ["torch", "pine_log", 2],
+    ["ladder", "pine_log", 1],
+    ["woodStairs", "pine_log", 2],
     ["stoneStairs", "stone", 2],
   ] as const)("reserves one %s recipe and produces each %s-based output separately", (id, material, quantity) => {
     const session = GameSession.create("Test", "craft", 1000);
@@ -42,11 +42,11 @@ describe("progressive crafting", () => {
   it("reserves materials across inventory and shortcuts and clears exhausted slots", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.inventory.wood = 1;
-    session.hotbar[7] = { itemId: "wood", quantity: 1 };
+    session.inventory.pine_log = 1;
+    session.hotbar[7] = { itemId: "pine_log", quantity: 1 };
     session.selectHotbar(7);
     expect(session.startCraft("torch", 4)).toEqual({ ok: true });
-    expect(session.inventory.wood).toBe(0);
+    expect(session.inventory.pine_log).toBe(0);
     expect(session.hotbar[7]).toBeNull();
     expect(session.selectedItem).toBeNull();
     expect(session.startCraft("ladder", 1).ok).toBe(false);
@@ -57,7 +57,7 @@ describe("progressive crafting", () => {
   it("crafts from shortcuts alone and tops up an existing output shortcut", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "wood", quantity: 1 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 1 };
     session.hotbar[4] = { itemId: "torch", quantity: 4 };
     session.selectHotbar(2);
     expect(session.startCraft("torch", 2)).toEqual({ ok: true });
@@ -72,7 +72,7 @@ describe("progressive crafting", () => {
   it("fills a shortcut then puts overflow in inventory across a save and reload", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.inventory.wood = 2;
+    session.inventory.pine_log = 2;
     session.hotbar[4] = { itemId: "torch", quantity: 97, rotation: 90 };
     expect(session.startCraft("torch", 4)).toEqual({ ok: true });
     advance(session, RECIPES.torch.ticksPerItem + 30);
@@ -89,7 +89,7 @@ describe("progressive crafting", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.inventory.dirt = 99 * 24;
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "wood", quantity: 1 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 1 };
     session.hotbar[4] = { itemId: "torch", quantity: 97 };
     expect(session.startCraft("torch", 2)).toEqual({ ok: true });
     advance(session, 2 * RECIPES.torch.ticksPerItem);
@@ -103,7 +103,7 @@ describe("progressive crafting", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.inventory.dirt = 99 * 24;
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "wood", quantity: 2 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 2 };
     session.hotbar[4] = { itemId: "torch", quantity: 98 };
     const before = session.snapshot(2000);
     expect(session.startCraft("torch", 4)).toMatchObject({ ok: false });
@@ -113,7 +113,7 @@ describe("progressive crafting", () => {
   it("waits only when both storages are full and resumes into a shortcut after reloading", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "wood", quantity: 2 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 2 };
     session.hotbar[4] = { itemId: "torch", quantity: 97 };
     expect(session.startCraft("torch", 4)).toEqual({ ok: true });
     session.inventory.dirt = 99 * 24;
@@ -143,7 +143,7 @@ describe("progressive crafting", () => {
     session.hotbar.fill(null);
     expect(session.startCraft("ladder", 1).ok).toBe(false);
     session.inventory.dirt = 99 * 23;
-    session.inventory.wood = 2;
+    session.inventory.pine_log = 2;
     const before = session.snapshot(2000);
     expect(session.startCraft("torch", 2).ok).toBe(false);
     expect(session.snapshot(2000)).toEqual(before);
@@ -152,10 +152,10 @@ describe("progressive crafting", () => {
   it("supports batches spanning multiple inventory stacks", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.inventory.wood = 50;
+    session.inventory.pine_log = 50;
     expect(session.startCraft("torch", 100)).toEqual({ ok: true });
     advance(session, 100 * RECIPES.torch.ticksPerItem);
-    expect(session.inventory.wood).toBe(0);
+    expect(session.inventory.pine_log).toBe(0);
     expect(session.inventory.torch).toBe(100);
     expect(session.crafting).toBeNull();
   });
@@ -163,13 +163,13 @@ describe("progressive crafting", () => {
   it("round-trips an unfinished batch and continues without reserving or producing twice", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.inventory.wood = 1;
+    session.inventory.pine_log = 1;
     expect(session.startCraft("torch", 2).ok).toBe(true);
     advance(session, 90);
     expect(session.inventory.torch).toBe(1);
     expect(session.crafting).toMatchObject({ completed: 1, progressTicks: 30 });
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
-    expect(restored.inventory.wood).toBe(0);
+    expect(restored.inventory.pine_log).toBe(0);
     expect(restored.inventory.torch).toBe(1);
     advance(restored, 29);
     expect(restored.inventory.torch).toBe(1);
@@ -181,7 +181,7 @@ describe("progressive crafting", () => {
   it("waits visibly when space fills during a batch, and resumes after saving and freeing space", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.hotbar[0] = { itemId: "wood", quantity: 1 };
+    session.hotbar[0] = { itemId: "pine_log", quantity: 1 };
     expect(session.startCraft("torch", 2).ok).toBe(true);
     session.inventory.dirt = 99 * 24;
     advance(session, RECIPES.torch.ticksPerItem);
@@ -210,19 +210,19 @@ describe("craft quantity selection", () => {
   it("caps a selection using ingredients from both the bag and shortcuts", () => {
     const session = GameSession.create("Test", "craft-selection", 1000);
     session.hotbar.fill(null);
-    session.inventory.wood = 3;
-    session.hotbar[7] = { itemId: "wood", quantity: 2 };
-    const available = (itemId: BlockItemId): number => session.totalItems(itemId);
+    session.inventory.pine_log = 3;
+    session.hotbar[7] = { itemId: "pine_log", quantity: 2 };
+    const available = (itemId: MaterialItemId): number => session.totalItems(itemId);
     expect(clampCraftQuantity(RECIPES.torch, 99, available)).toBe(10);
     expect(clampCraftQuantity(RECIPES.torch, 4, available)).toBe(4);
-    session.inventory.wood = 0;
+    session.inventory.pine_log = 0;
     expect(clampCraftQuantity(RECIPES.torch, 10, available)).toBe(4);
   });
 
   it("uses the limiting ingredient of a multi-material recipe", () => {
-    const available = { wood: 12, stone: 3 };
+    const available = { pine_log: 12, stone: 3 };
     expect(clampCraftQuantity(RECIPES.stonePickaxe, 99, (itemId) =>
-      itemId === "wood" ? available.wood : itemId === "stone" ? available.stone : 0)).toBe(3);
+      itemId === "pine_log" ? available.pine_log : itemId === "stone" ? available.stone : 0)).toBe(3);
   });
 
   it("limits the slider to 99 objects while preserving full recipe batches", () => {
@@ -234,6 +234,6 @@ describe("craft quantity selection", () => {
 
   it("returns zero when no full recipe can be made", () => {
     expect(clampCraftQuantity(RECIPES.torch, 2, () => 0)).toBe(0);
-    expect(clampCraftQuantity(RECIPES.stonePickaxe, 5, (itemId) => itemId === "wood" ? 5 : 0)).toBe(0);
+    expect(clampCraftQuantity(RECIPES.stonePickaxe, 5, (itemId) => itemId === "pine_log" ? 5 : 0)).toBe(0);
   });
 });

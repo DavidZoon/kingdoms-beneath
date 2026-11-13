@@ -43,8 +43,8 @@ describe("IndexedDB save slot", () => {
     save.edits.push({ x: 10, y, block: Block.Stone });
     save.blockDamage.push({ x: 10, y, damage: 2, plane: "foreground" });
     const { lightingQuality: _quality, ...previous } = save;
-    const inventory = { dirt: 12, stone: 0, wood: 24, ladder: 6 };
-    const legacy = { ...previous, schemaVersion: 3, generatorVersion: 2, inventory, selectedItem: "wood" };
+    const inventory = { dirt: 12, stone: 0, pine_log: 24, ladder: 6 };
+    const legacy = { ...previous, schemaVersion: 3, generatorVersion: 2, inventory, selectedItem: "pine_log" };
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(name, 1);
       request.onupgradeneeded = () => request.result.createObjectStore("saves");
@@ -60,13 +60,13 @@ describe("IndexedDB save slot", () => {
     database.close();
     const migrated = await repository.read();
     expect(migrated).toMatchObject({
-      schemaVersion: 8, generatorVersion: 2, creativeMode: true,
+      schemaVersion: 10, generatorVersion: 2, creativeMode: true,
       blockDamage: save.blockDamage, edits: save.edits,
       selectedSlot: 2, lightingQuality: "standard",
     });
     if (!migrated) throw new Error("La sauvegarde migrée est introuvable.");
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 12 });
-    expect(migrated.hotbar[2]).toEqual({ itemId: "wood", quantity: 24 });
+    expect(migrated.hotbar[2]).toEqual({ itemId: "pine_log", quantity: 24 });
     expect(migrated.hotbar[4]).toBeNull();
     await repository.write(migrated);
     await repository.close();
@@ -77,7 +77,7 @@ describe("IndexedDB save slot", () => {
   it("replaces the slot only after validating the new state", async () => {
     const save = GameSession.create("Test", "test", 1000).snapshot(2000);
     await repository.write(save);
-    const invalid: SaveGame = { ...save, inventory: { ...save.inventory, wood: -1 } };
+    const invalid: SaveGame = { ...save, inventory: { ...save.inventory, pine_log: -1 } };
     await expect(repository.write(invalid)).rejects.toThrow(/Inventaire/);
     expect(await repository.read()).toEqual(save);
     const next = { ...save, name: "Imported world" };

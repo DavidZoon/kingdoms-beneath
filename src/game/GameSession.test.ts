@@ -3,6 +3,7 @@ import { PLAYER_HEIGHT } from "../player/PlayerController";
 import { parseSave, serializeSave, validateSave } from "../save/schema";
 import { Block, BLOCKS, TILE_SIZE } from "../world/blocks";
 import { GameSession, MAX_GROUND_DROPS } from "./GameSession";
+import { isPlantItem } from "../world/resources";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
 
@@ -27,7 +28,122 @@ function ladderSession(): GameSession {
   return session;
 }
 
+function plantSession() {
+  const session = GameSession.create("Plantes", "forest-harvest", 1000);
+  for (let x = 20; x < 1000; x++) {
+    const y = session.world.generator.surfaceAt(x);
+    if (session.world.getBlock(x, y) !== Block.Dirt ||
+        !session.world.naturalHarvestAt(x, y, "foreground").some(isPlantItem)) continue;
+    session.player.x = x * TILE_SIZE;
+    session.player.y = y * TILE_SIZE - PLAYER_HEIGHT;
+    session.world.setBlock(x, y - 1, Block.Air);
+    session.world.setBlock(x, y - 2, Block.Air);
+    const plants = session.plantsAt(x, y - 1);
+    const plant = plants[0];
+    if (plant && plants.length === 1) return { session, plant, supportY: y };
+  }
+  throw new Error("No plant support found.");
+}
+
 describe("first playable session", () => {
+  it("stores non-block resources in stacks without allowing construction", () => {
+    const session = flatSession();
+    session.setCreativeMode(true);
+    expect(session.grantResources("fur", 3)).toEqual({ ok: true, added: 3 });
+    expect(session.moveInventoryToHotbar(0, 7)).toEqual({ ok: true });
+    session.selectHotbar(7);
+    expect(session.rotateSelected(1)).toMatchObject({ ok: false });
+    expect(session.setHotbarPlane(7, "foreground")).toMatchObject({ ok: false });
+    const y = Math.floor(session.player.y / TILE_SIZE);
+    expect(session.place(10, y)).toMatchObject({ ok: false });
+    expect(session.world.getBlock(10, y)).toBe(Block.Air);
+    expect(session.totalItems("fur")).toBe(3);
+    expect(new GameSession(parseSave(serializeSave(session.snapshot(2000)))).totalItems("fur")).toBe(3);
+  });
+
+  it("harvests a plant directly without removing its support or wearing the equipped tool", () => {
+    const { session, plant, supportY } = plantSession();
+    session.hotbar[1] = { itemId: "stonePickaxe", quantity: 1, durability: 100 };
+    session.selectHotbar(1);
+    expect(session.harvestPlant(plant.x, plant.y)).toEqual({ ok: true });
+    expect(session.totalItems(plant.itemId)).toBe(1);
+    expect(session.world.getBlock(plant.x, supportY)).toBe(Block.Dirt);
+    expect(session.getBlockDamage(plant.x, supportY)).toBe(0);
+    expect(session.hotbar[1].durability).toBe(100);
+    const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
+    expect(restored.plantsAt(plant.x, plant.y).some((entry) => entry.id === plant.id)).toBe(false);
+    expect(restored.snapshot(3000).collectedPlants).toContain(plant.id);
+    expect(restored.harvestPlant(plant.x, plant.y)).toMatchObject({ ok: false });
+    expect(restored.totalItems(plant.itemId)).toBe(1);
+  });
+
+  it("does not award plants by mining or rebuilding the block below them", () => {
+    const { session, plant, supportY } = plantSession();
+    expect(session.mine(plant.x, supportY, 4)).toEqual({ ok: true, destroyed: true });
+    expect(session.totalItems(plant.itemId)).toBe(0);
+    expect(session.plantsAt(plant.x, plant.y)).toEqual([]);
+    session.selectHotbar(0);
+    expect(session.place(plant.x, supportY)).toEqual({ ok: true });
+    const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
+    expect(restored.plantsAt(plant.x, plant.y)).toEqual([]);
+    expect(restored.totalItems(plant.itemId)).toBe(0);
+  });
+
+  it("refuses inaccessible plants and leaves a harvest on the ground when the inventory is full", () => {
+    const { session, plant, supportY } = plantSession();
+    session.player.x -= 2 * TILE_SIZE;
+    session.world.setBlock(plant.x - 1, plant.y, Block.Stone);
+    expect(session.getPlantTarget(plant.x, plant.y)).toBeNull();
+    expect(session.harvestPlant(plant.x, plant.y)).toMatchObject({ ok: false });
+    session.player.x = plant.x * TILE_SIZE;
+    session.inventory.dirt = 99 * 24;
+    session.groundDrops.push(...Array.from({ length: MAX_GROUND_DROPS }, (_, index) => ({
+      id: `full-${index}`, x: 0, y: 0, itemId: "dirt" as const, quantity: 1,
+    })));
+    const before = session.snapshot(2000);
+    expect(session.harvestPlant(plant.x, plant.y)).toMatchObject({ ok: false, reason: expect.stringContaining("pleins") });
+    expect(session.snapshot(2000)).toEqual(before);
+    session.groundDrops.length = 0;
+    expect(session.harvestPlant(plant.x, plant.y)).toEqual({ ok: true });
+    expect(session.groundDrops).toHaveLength(1);
+    expect(session.groundDrops[0]).toMatchObject({ itemId: plant.itemId, quantity: 1 });
+    expect(session.world.getBlock(plant.x, supportY)).toBe(Block.Dirt);
+  });
+
+  it("never mines liquids or wears tools on them, but can mine a block through water", () => {
+    const session = flatSession();
+    const y = Math.floor((session.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    session.world.setBlock(10, y, Block.Water);
+    session.hotbar[1] = { itemId: "stonePickaxe", quantity: 1, durability: 100 };
+    session.selectHotbar(1);
+    const before = session.snapshot(2000);
+    expect(session.mine(10, y, 100)).toMatchObject({ ok: false, reason: expect.stringContaining("liquides") });
+    expect(session.snapshot(2000)).toEqual(before);
+    session.world.setBlock(11, y, Block.Stone);
+    expect(session.getMiningTarget(11, y)).toEqual({ x: 11, y, plane: "foreground" });
+    expect(session.mine(11, y, 12)).toEqual({ ok: true, destroyed: true });
+    expect(session.world.getBlock(10, y)).toBe(Block.Water);
+    expect(session.hotbar[1].durability).toBe(99);
+  });
+
+  it("picks up aquatic resources only once, including after saving and reloading", () => {
+    const session = GameSession.create("Rivière", "aquatic-pickups", 1000);
+    let pickup: ReturnType<GameSession["naturalPickups"]>[number] | undefined;
+    for (let x = 20; x < 2000 && !pickup; x++) {
+      const level = session.world.generator.waterLevelAt(x);
+      if (level !== null) pickup = session.naturalPickups(x, x, level, level + 2)[0];
+    }
+    if (!pickup) throw new Error("No aquatic resource found.");
+    session.player.x = pickup.x - 6;
+    session.player.y = pickup.y - PLAYER_HEIGHT / 2;
+    session.step(idle);
+    expect(session.totalItems(pickup.itemId)).toBe(1);
+    const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
+    restored.step(idle);
+    expect(restored.totalItems(pickup.itemId)).toBe(1);
+    expect(restored.snapshot(3000).collectedNaturalPickups).toContain(pickup.id);
+  });
+
   it("spawns above solid ground and preserves a stationary player", () => {
     const session = flatSession();
     const y = session.player.y;
@@ -74,18 +190,18 @@ describe("first playable session", () => {
     const session = flatSession();
     const y = Math.floor(session.player.y / TILE_SIZE);
     session.world.setBlock(11, y, Block.Stone);
-    const count = session.totalItems("wood");
+    const count = session.totalItems("pine_log");
     expect(session.place(8, y).ok).toBe(false);
-    expect(session.totalItems("wood")).toBe(count);
+    expect(session.totalItems("pine_log")).toBe(count);
     expect(session.place(10, y)).toEqual({ ok: true });
-    expect(session.world.getBlock(10, y)).toBe(Block.Wood);
-    expect(session.totalItems("wood")).toBe(count - 1);
+    expect(session.world.getBlock(10, y)).toBe(Block.PineLog);
+    expect(session.totalItems("pine_log")).toBe(count - 1);
     expect(session.place(10, y).ok).toBe(false);
-    expect(session.totalItems("wood")).toBe(count - 1);
-    for (let hit = 0; hit < BLOCKS[Block.Wood].durability!; hit++) {
+    expect(session.totalItems("pine_log")).toBe(count - 1);
+    for (let hit = 0; hit < BLOCKS[Block.PineLog].durability!; hit++) {
       expect(session.mine(10, y).ok).toBe(true);
     }
-    expect(session.totalItems("wood")).toBe(count);
+    expect(session.totalItems("pine_log")).toBe(count);
     session.hotbar[2] = null;
     expect(session.place(10, y).ok).toBe(false);
     expect(session.world.getBlock(10, y)).toBe(Block.Air);
@@ -186,25 +302,25 @@ describe("first playable session", () => {
 
   it("drops selected items, persists them, and collects them in range", () => {
     const session = flatSession();
-    const before = session.totalItems("wood");
+    const before = session.totalItems("pine_log");
     expect(session.dropSelectedItem()).toEqual({ ok: true });
-    expect(session.totalItems("wood")).toBe(before - 1);
+    expect(session.totalItems("pine_log")).toBe(before - 1);
     expect(session.groundDrops).toHaveLength(1);
     const save = parseSave(serializeSave(session.snapshot(2000)));
     const resumed = new GameSession(save);
     expect(resumed.groundDrops).toHaveLength(1);
-    expect(resumed.totalItems("wood")).toBe(before - 1);
+    expect(resumed.totalItems("pine_log")).toBe(before - 1);
     resumed.player.x = resumed.groundDrops[0].x - 6;
     resumed.step(idle);
     expect(resumed.groundDrops).toHaveLength(0);
-    expect(resumed.totalItems("wood")).toBe(before);
+    expect(resumed.totalItems("pine_log")).toBe(before);
   });
 
   it("mines into a visible ground drop when all 24 inventory stacks are full", () => {
     const session = flatSession();
     session.hotbar[0] = { itemId: "dirt", quantity: 99 };
     session.inventory.dirt = 99 * 23;
-    session.inventory.wood = 99;
+    session.inventory.pine_log = 99;
     session.inventory.ladder = 0;
     session.inventory.torch = 0;
     const ground = session.world.generator.surfaceAt(8);
@@ -249,24 +365,24 @@ describe("first playable session", () => {
   it("collects into shortcuts first and leaves only the excess on the ground if storage is full", () => {
     const session = flatSession();
     session.inventory.dirt = 99 * 24;
-    session.hotbar[2] = { itemId: "wood", quantity: 98, rotation: 270 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 98, rotation: 270 };
     session.groundDrops.push({
       id: "pickup", x: session.player.x + 6, y: session.player.y + PLAYER_HEIGHT / 2,
-      itemId: "wood", quantity: 4,
+      itemId: "pine_log", quantity: 4,
     });
     session.step(idle);
-    expect(session.hotbar[2]).toEqual({ itemId: "wood", quantity: 99, rotation: 270 });
-    expect(session.inventory.wood).toBe(0);
+    expect(session.hotbar[2]).toEqual({ itemId: "pine_log", quantity: 99, rotation: 270 });
+    expect(session.inventory.pine_log).toBe(0);
     expect(session.groundDrops[0].quantity).toBe(3);
     session.inventory.dirt -= 99;
     session.step(idle);
-    expect(session.inventory.wood).toBe(3);
+    expect(session.inventory.pine_log).toBe(3);
     expect(session.groundDrops).toHaveLength(0);
   });
 
   it.each([
     [Block.Dirt, 4], [Block.Grass, 4], [Block.Meadow, 4], [Block.Stone, 12],
-    [Block.Wood, 6], [Block.Branch, 3], [Block.Ladder, 3], [Block.Leaves, 1], [Block.Torch, 2],
+    [Block.PineLog, 8], [Block.Branch, 3], [Block.Ladder, 3], [Block.Leaves, 1], [Block.Torch, 2],
   ] as const)(
     "uses the material durability for block %s and grants loot only once",
     (block, durability) => {
@@ -326,15 +442,15 @@ describe("first playable session", () => {
     expect(resumed.creativeMode).toBe(true);
     expect(resumed.inventory.stone).toBe(before + 99);
     resumed.setCreativeMode(false);
-    expect(resumed.grantResources("wood", 1).ok).toBe(false);
+    expect(resumed.grantResources("pine_log", 1).ok).toBe(false);
   });
 
   it("reports partial creative grants and rejects full inventory and invalid quantities", () => {
     const session = flatSession();
     session.setCreativeMode(true);
-    Object.assign(session.inventory, { dirt: 99 * 23, stone: 98, wood: 0, ladder: 0, torch: 0 });
+    Object.assign(session.inventory, { dirt: 99 * 23, stone: 98, pine_log: 0, ladder: 0, torch: 0 });
     expect(session.grantResources("stone", 99)).toEqual({ ok: true, added: 1 });
-    expect(session.grantResources("wood", 1).ok).toBe(false);
+    expect(session.grantResources("pine_log", 1).ok).toBe(false);
     for (const quantity of [-1, 0, 0.5, NaN, Infinity, 2377]) {
       expect(session.grantResources("stone", quantity).ok).toBe(false);
     }
@@ -399,25 +515,25 @@ describe("first playable session", () => {
     expect(() => validateSave(session.snapshot(2000))).not.toThrow();
   });
 
-  it("reserves torch materials atomically and reuses a slot freed by the last wood", () => {
+  it("reserves torch materials atomically and reuses a slot freed by the last pine_log", () => {
     const session = flatSession();
     session.hotbar.fill(null);
 
-    Object.assign(session.inventory, { dirt: 99 * 22, stone: 99, wood: 2, ladder: 0, torch: 0 });
+    Object.assign(session.inventory, { dirt: 99 * 22, stone: 99, pine_log: 2, ladder: 0, torch: 0 });
     const full = { ...session.inventory };
     expect(session.startCraft("torch", 2).ok).toBe(false);
     expect(session.inventory).toEqual(full);
 
-    session.inventory.wood = 1;
+    session.inventory.pine_log = 1;
     expect(session.startCraft("torch", 2)).toEqual({ ok: true });
-    expect(session.inventory.wood).toBe(0);
+    expect(session.inventory.pine_log).toBe(0);
     for (let tick = 0; tick < 120; tick++) session.step(idle);
     expect(session.inventory.torch).toBe(2);
     const noWood = { ...session.inventory };
     expect(session.startCraft("torch", 2).ok).toBe(false);
     expect(session.inventory).toEqual(noWood);
 
-    Object.assign(session.inventory, { dirt: 99 * 22, stone: 0, wood: 2, ladder: 0, torch: 98 });
+    Object.assign(session.inventory, { dirt: 99 * 22, stone: 0, pine_log: 2, ladder: 0, torch: 98 });
     const partialSpace = { ...session.inventory };
     expect(session.startCraft("torch", 2).ok).toBe(false);
     expect(session.inventory).toEqual(partialSpace);

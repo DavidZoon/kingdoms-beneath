@@ -1,4 +1,4 @@
-import { Block, BLOCKS, TILE_ART_SIZE, type BlockId } from "../world/blocks";
+import { Block, BLOCKS, ITEM_BLOCKS, RESOURCES, TILE_ART_SIZE, isBlockItem, type BlockId, type MaterialItemId } from "../world/blocks";
 
 export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, x = 0): void {
   ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
@@ -25,15 +25,15 @@ export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, 
     ctx.fillStyle = "#465654";
     ctx.fillRect(x + 15, 11, 3, 5);
     ctx.fillRect(x + 5, 24, 4, 3);
-  } else if (block === Block.Wood) {
+  } else if ([Block.PineLog, Block.OakLog, Block.BirchLog, Block.JungleLog, Block.DeadwoodLog].some((log) => log === block)) {
     ctx.fillStyle = "#c28b4d";
     ctx.fillRect(x + 5, 0, 4, TILE_ART_SIZE);
     ctx.fillStyle = "#704c32";
     ctx.fillRect(x + 23, 0, 3, TILE_ART_SIZE);
     for (let py = 4; py < TILE_ART_SIZE; py += 9) ctx.fillRect(x + 12, py, 5, 2);
-  } else if (block === Block.Leaves || block === Block.Branch) {
+  } else if (block === Block.Leaves || block === Block.Branch || block === Block.OakLeaf || block === Block.PineNeedle) {
     ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
-    ctx.fillStyle = block === Block.Leaves ? "#3d7553" : "#66804a";
+    ctx.fillStyle = definition.color;
     ctx.fillRect(x + 3, 4, 24, 23);
     ctx.fillStyle = block === Block.Leaves ? "#71a763" : "#a3a65b";
     ctx.fillRect(x + 7, 7, 9, 5);
@@ -72,7 +72,64 @@ export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, 
       ctx.fillStyle = block === Block.WoodStairs ? "#704c32" : "#465654";
       ctx.fillRect(x + step * 8, top + 2, 1, TILE_ART_SIZE - top - 2);
     }
+  } else if (block === Block.Water) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = definition.color;
+    ctx.fillRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#96C8EF";
+    ctx.fillRect(x + 3, 6, 12, 2);
+    ctx.fillRect(x + 18, 22, 10, 2);
+  } else {
+    ctx.fillStyle = "#ffffff";
+    ctx.globalAlpha = 0.25;
+    for (const [px, py] of [[4, 7], [21, 18], [10, 26]]) ctx.fillRect(x + px, py, 4, 3);
+    ctx.globalAlpha = 1;
   }
+}
+
+export function drawItemTexture(ctx: CanvasRenderingContext2D, item: MaterialItemId): void {
+  if (isBlockItem(item)) {
+    drawBlockTexture(ctx, ITEM_BLOCKS[item]);
+    return;
+  }
+  ctx.clearRect(0, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+  ctx.fillStyle = RESOURCES[item].color;
+  if (item.endsWith("_plant") || ["vine", "tall_grass", "reed", "wild_berry", "herb_mint", "lavender", "aloe"].includes(item)) {
+    ctx.fillRect(14, 10, 4, 22);
+    ctx.fillRect(6, 12, 9, 5);
+    ctx.fillRect(18, 6, 8, 5);
+    ctx.fillRect(9, 22, 6, 4);
+    return;
+  }
+  if (item.startsWith("mushroom_")) {
+    ctx.fillRect(6, 10, 20, 10);
+    ctx.fillStyle = "#E8E2D0";
+    ctx.fillRect(13, 20, 6, 12);
+    return;
+  }
+  ctx.fillRect(8, 8, 16, 16);
+  ctx.fillStyle = "#ffffff";
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(10, 10, 8, 4);
+  ctx.globalAlpha = 1;
+}
+
+const itemIconUrls = new Map<MaterialItemId, string>();
+
+export function itemIconUrl(item: MaterialItemId): string {
+  const cached = itemIconUrls.get(item);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_ART_SIZE;
+  canvas.height = TILE_ART_SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Impossible de dessiner les icônes des objets.");
+  drawItemTexture(ctx, item);
+  const url = canvas.toDataURL("image/png");
+  itemIconUrls.set(item, url);
+  return url;
 }
 
 const iconUrls = new Map<BlockId, string>();

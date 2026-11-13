@@ -5,10 +5,11 @@ import {
 import { isRecipeId, RECIPES, validCraftQuantity, type CraftJob } from "../crafting/Recipes";
 import { PLAYER_HEIGHT, PLAYER_WIDTH, playerOverlapsSolid } from "../player/PlayerController";
 import {
-  Block, BLOCKS, MAX_TILE_X, TILE_SIZE, WORLD_HEIGHT, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isBlockId, isToolItem,
+  Block, BLOCKS, MATERIAL_ITEMS, MAX_TILE_X, TILE_SIZE, WORLD_HEIGHT, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isBlockId, isToolItem,
   isConstructionPlane, isItemId, isRotation, itemForBlock, type ConstructionPlane, type Inventory, type ItemId,
 } from "../world/blocks";
 import { WorldModel, cellKey, type TileEdit } from "../world/WorldModel";
+import { PLANT_ITEMS } from "../world/resources";
 import { isLightingQuality } from "../lighting/quality";
 import type { BlockDamage, GroundDrop, SaveGame } from "./types";
 
@@ -35,10 +36,10 @@ function text(value: unknown, max: number): value is string {
 }
 
 function itemAvailableInVersion(itemId: ItemId, version: unknown): boolean {
-  if (isToolItem(itemId)) return version === 8;
-  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 8);
-  if (itemId === "torch") return integer(version, 4, 8);
-  return true;
+  if (isToolItem(itemId)) return integer(version, 8, 10);
+  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 10);
+  if (itemId === "torch") return integer(version, 4, 10);
+  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 10);
 }
 
 function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean, location = "objet"): ItemStack {
@@ -61,19 +62,35 @@ function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean,
 }
 
 export function validateSave(value: unknown): SaveGame {
+  if (record(value) && integer(value.schemaVersion, 1, 8)) {
+    const migrateStack = (stack: unknown): unknown =>
+      record(stack) && stack.itemId === "wood" ? { ...stack, itemId: "pine_log" } : stack;
+    value = {
+      ...value,
+      inventory: record(value.inventory) ? {
+        ...value.inventory, pine_log: value.inventory.pine_log ?? value.inventory.wood,
+      } : value.inventory,
+      selectedItem: value.selectedItem === "wood" ? "pine_log" : value.selectedItem,
+      hotbar: Array.isArray(value.hotbar) ? value.hotbar.map(migrateStack) : value.hotbar,
+      groundDrops: Array.isArray(value.groundDrops) ? value.groundDrops.map(migrateStack) : value.groundDrops,
+    };
+  }
   if (!record(value) || value.format !== "kingdoms-beneath") {
     throw new SaveValidationError("Ce fichier n'est pas une sauvegarde Kingdoms Beneath.");
   }
   const legacy = value.schemaVersion === 1 && value.generatorVersion === 1;
   const current = (value.schemaVersion === 2 || value.schemaVersion === 3 ||
     value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 ||
-    value.schemaVersion === 7 || value.schemaVersion === 8) &&
+    value.schemaVersion === 7 || value.schemaVersion === 8 || value.schemaVersion === 9 || value.schemaVersion === 10) &&
     (value.generatorVersion === 1 || value.generatorVersion === 2 ||
-      ((value.schemaVersion === 7 || value.schemaVersion === 8) && value.generatorVersion === 3));
+      (integer(value.schemaVersion, 7, 10) && value.generatorVersion === 3) ||
+      (integer(value.schemaVersion, 9, 10) && value.generatorVersion === 4) ||
+      (value.schemaVersion === 10 && value.generatorVersion === 5));
   if (!legacy && !current) {
     throw new SaveValidationError("Version de sauvegarde ou de générateur non prise en charge.");
   }
-  const hasTools = value.schemaVersion === 8;
+  const hasResources = value.schemaVersion === 9 || value.schemaVersion === 10;
+  const hasTools = value.schemaVersion === 8 || hasResources;
   const hasLayers = value.schemaVersion === 7 || hasTools;
   const hasRotations = value.schemaVersion === 6 || hasLayers;
   const hasHotbar = value.schemaVersion === 5 || hasRotations;
@@ -106,14 +123,14 @@ export function validateSave(value: unknown): SaveGame {
   if (!record(inventory)) throw new SaveValidationError("Inventaire de sauvegarde invalide.");
   const dirt = inventory.dirt;
   const stone = inventory.stone;
-  const wood = inventory.wood;
+  const pine_log = inventory.pine_log;
   const ladder = inventory.ladder;
   const torch = inventory.torch;
   const woodStairs = inventory.woodStairs;
   const stoneStairs = inventory.stoneStairs;
   if (!integer(dirt, 0, legacy ? 9999 : MAX_STACK) ||
       !integer(stone, 0, legacy ? 9999 : MAX_STACK) ||
-      !integer(wood, 0, legacy ? 9999 : MAX_STACK) ||
+      !integer(pine_log, 0, legacy ? 9999 : MAX_STACK) ||
       (legacy ? (ladder !== undefined && !integer(ladder, 0, MAX_STACK)) :
         !integer(ladder, 0, MAX_STACK)) ||
       (hasLighting && !integer(torch, 0, MAX_STACK)) ||
@@ -124,15 +141,23 @@ export function validateSave(value: unknown): SaveGame {
   const validatedInventory: Inventory = legacy
     ? emptyInventory()
     : {
+      ...emptyInventory(),
       dirt,
       stone,
-      wood,
+      pine_log,
       ladder: !legacy && typeof ladder === "number" ? ladder : 0,
       torch: hasLighting && typeof torch === "number" ? torch : 0,
       woodStairs: hasHotbar && typeof woodStairs === "number" ? woodStairs : 0,
       stoneStairs: hasHotbar && typeof stoneStairs === "number" ? stoneStairs : 0,
       tools: [],
     };
+  if (hasResources) {
+    for (const item of MATERIAL_ITEMS) {
+      const quantity = inventory[item];
+      if (!integer(quantity, 0, MAX_STACK)) throw new SaveValidationError(`Quantité de ${item} invalide.`);
+      validatedInventory[item] = quantity;
+    }
+  }
   if (hasTools) {
     if (!Array.isArray(inventory.tools) || inventory.tools.length > INVENTORY_SLOT_COUNT) {
       throw new SaveValidationError("Liste d'outils de l'inventaire invalide.");
@@ -148,12 +173,12 @@ export function validateSave(value: unknown): SaveGame {
   }
   const migratedDrops: GroundDrop[] = [];
   if (legacy) {
-    for (const itemId of ["dirt", "stone", "wood"] as const) {
-      const count = itemId === "dirt" ? dirt : itemId === "stone" ? stone : wood;
+    for (const itemId of ["dirt", "stone", "pine_log"] as const) {
+      const count = itemId === "dirt" ? dirt : itemId === "stone" ? stone : pine_log;
       const accepted = addItems(validatedInventory, itemId, count);
       for (let remaining = count - accepted, index = 0; remaining > 0; remaining -= STACK_SIZE, index++) {
         migratedDrops.push({
-          id: `legacy-${itemId}-${index}`,
+          id: `legacy-${itemId.replaceAll("_", "-")}-${index}`,
           x: Math.min(MAX_TILE_X * TILE_SIZE, playerX + PLAYER_WIDTH / 2 + TILE_SIZE * 2),
           y: playerY + PLAYER_HEIGHT / 2,
           itemId,
@@ -175,7 +200,9 @@ export function validateSave(value: unknown): SaveGame {
     }
     hotbar = value.hotbar.map((stack: unknown) => {
       if (stack === null) return null;
-      return validateStack(stack, hasTools, hasRotations, "raccourci");
+      const validated = validateStack(stack, hasTools, hasRotations, "raccourci");
+      if (!itemAvailableInVersion(validated.itemId, value.schemaVersion)) throw new SaveValidationError("Objet de raccourci incompatible avec la version.");
+      return validated;
     });
     selectedSlot = value.selectedSlot;
     if (value.crafting !== null) {
@@ -193,7 +220,7 @@ export function validateSave(value: unknown): SaveGame {
       };
     }
   } else {
-    const oldItems = ["dirt", "stone", "wood", "ladder", "torch"] as const;
+    const oldItems = ["dirt", "stone", "pine_log", "ladder", "torch"] as const;
     if (!isItemId(value.selectedItem)) throw new SaveValidationError("Sélection invalide.");
     selectedSlot = oldItems.findIndex((item) => item === value.selectedItem);
     if (selectedSlot < 0) throw new SaveValidationError("Sélection invalide.");
@@ -240,7 +267,7 @@ export function validateSave(value: unknown): SaveGame {
   const edits: TileEdit[] = value.edits.map((edit: unknown) => {
     if (!record(edit) || !integer(edit.x, -MAX_TILE_X, MAX_TILE_X) ||
         !integer(edit.y, 0, WORLD_HEIGHT - 2) || !isBlockId(edit.block) ||
-        edit.block === Block.Bedrock ||
+        edit.block === Block.Bedrock || (!hasResources && edit.block > Block.StoneStairs) ||
         (!hasLighting && edit.block === Block.Torch) ||
         (!hasHotbar && (edit.block === Block.WoodStairs || edit.block === Block.StoneStairs))) {
       throw new SaveValidationError("Modification de terrain invalide.");
@@ -254,7 +281,8 @@ export function validateSave(value: unknown): SaveGame {
     }
     return { x: edit.x, y: edit.y, block: edit.block, ...(rotation !== 0 ? { rotation } : {}) };
   });
-  const generatorVersion = value.generatorVersion === 1 ? 1 : value.generatorVersion === 2 ? 2 : 3;
+  const generatorVersion = value.generatorVersion === 1 ? 1 : value.generatorVersion === 2 ? 2 :
+    value.generatorVersion === 3 ? 3 : value.generatorVersion === 4 ? 4 : 5;
   const generatedWorld = new WorldModel(value.seed, edits, generatorVersion);
   const rawBackgroundEdits = hasLayers ? value.backgroundEdits : [];
   if (!Array.isArray(rawBackgroundEdits) || edits.length + rawBackgroundEdits.length > MAX_EDITS) {
@@ -263,7 +291,8 @@ export function validateSave(value: unknown): SaveGame {
   const backgroundCells = new Set<string>();
   const backgroundEdits: TileEdit[] = rawBackgroundEdits.map((edit: unknown) => {
     if (!record(edit) || !integer(edit.x, -MAX_TILE_X, MAX_TILE_X) ||
-        !integer(edit.y, 0, WORLD_HEIGHT - 2) || !isBlockId(edit.block)) {
+        !integer(edit.y, 0, WORLD_HEIGHT - 2) || !isBlockId(edit.block) ||
+        (!hasResources && edit.block > Block.StoneStairs)) {
       throw new SaveValidationError("Modification d'arrière-plan invalide.");
     }
     const key = cellKey(edit.x, edit.y);
@@ -309,8 +338,43 @@ export function validateSave(value: unknown): SaveGame {
   });
   const lightingQuality = hasLighting ? value.lightingQuality : "standard";
   if (!isLightingQuality(lightingQuality)) throw new SaveValidationError("Qualité d'éclairage invalide.");
+  const rawCollected = hasResources ? value.collectedNaturalPickups : [];
+  if (!Array.isArray(rawCollected) || rawCollected.length > MAX_EDITS) {
+    throw new SaveValidationError("Liste de récoltes naturelles invalide.");
+  }
+  const collected = new Set<string>();
+  for (const id of rawCollected) {
+    if (typeof id !== "string" || collected.has(id)) throw new SaveValidationError("Récolte naturelle invalide ou dupliquée.");
+    const match = /^natural:(-?\d+),(\d+):(fish_raw|shell|pearl)$/.exec(id);
+    if (!match || !integer(Number(match[1]), -MAX_TILE_X, MAX_TILE_X) ||
+        !integer(Number(match[2]), 0, WORLD_HEIGHT - 2) ||
+        id !== `natural:${Number(match[1])},${Number(match[2])}:${match[3]}` ||
+        !world.generator.pickupsAt(Number(match[1]), Number(match[2])).some((pickup) => pickup.itemId === match[3])) {
+      throw new SaveValidationError("Récolte naturelle inexistante.");
+    }
+    collected.add(id);
+  }
+  const rawPlants = value.schemaVersion === 10 ? value.collectedPlants : [];
+  if (!Array.isArray(rawPlants) || rawPlants.length > MAX_EDITS) {
+    throw new SaveValidationError("Liste de plantes récoltées invalide.");
+  }
+  const collectedPlants = new Set<string>();
+  for (const id of rawPlants) {
+    if (typeof id !== "string" || collectedPlants.has(id)) {
+      throw new SaveValidationError("Plante récoltée invalide ou dupliquée.");
+    }
+    const match = /^plant:(-?\d+),(\d+):([a-z_]+)$/.exec(id);
+    const plant = match && PLANT_ITEMS.find((item) => item === match[3]);
+    if (!match || !plant || !integer(Number(match[1]), -MAX_TILE_X, MAX_TILE_X) ||
+        !integer(Number(match[2]), 0, WORLD_HEIGHT - 2) ||
+        id !== `plant:${Number(match[1])},${Number(match[2])}:${plant}` ||
+        !world.generator.harvestAt(Number(match[1]), Number(match[2])).includes(plant)) {
+      throw new SaveValidationError("Plante récoltée inexistante.");
+    }
+    collectedPlants.add(id);
+  }
   const result: SaveGame = {
-    format: "kingdoms-beneath", schemaVersion: 8, generatorVersion,
+    format: "kingdoms-beneath", schemaVersion: 10, generatorVersion,
     id: value.id, name: value.name, seed: value.seed,
     createdAt: value.createdAt, updatedAt: value.updatedAt, tick: value.tick,
     player: {
@@ -320,6 +384,8 @@ export function validateSave(value: unknown): SaveGame {
     inventory: validatedInventory,
     hotbar, hotbarPlanes, selectedSlot, crafting, edits, backgroundEdits,
     groundDrops, creativeMode, blockDamage, lightingQuality,
+    collectedNaturalPickups: [...collected].sort(),
+    collectedPlants: [...collectedPlants].sort(),
   };
   if (playerOverlapsSolid(world, result.player)) {
     throw new SaveValidationError("Le joueur est bloqué dans un bloc solide.");

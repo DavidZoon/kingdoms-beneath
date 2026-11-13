@@ -8,7 +8,7 @@ import type { LightingQuality } from "../lighting/quality";
 
 export interface SaveGame {
   format: "kingdoms-beneath";
-  schemaVersion: 8;
+  schemaVersion: 10;
   generatorVersion: GeneratorVersion;
   id: string;
   name: string;
@@ -25,6 +25,8 @@ export interface SaveGame {
   edits: TileEdit[];
   backgroundEdits: TileEdit[];
   groundDrops: GroundDrop[];
+  collectedNaturalPickups: string[];
+  collectedPlants: string[];
   creativeMode: boolean;
   blockDamage: BlockDamage[];
   lightingQuality: LightingQuality;

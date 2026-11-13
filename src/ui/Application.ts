@@ -4,7 +4,7 @@ import { InputController } from "../input/InputController";
 import { SaveRepository } from "../save/SaveRepository";
 import { MAX_SAVE_BYTES, SaveValidationError, parseSave, serializeSave } from "../save/schema";
 import type { SaveGame } from "../save/types";
-import { BLOCK_ITEMS, ITEM_BLOCKS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isItemId } from "../world/blocks";
+import { MATERIAL_ITEMS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId } from "../world/blocks";
 import {
   getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
@@ -14,7 +14,7 @@ import {
 import { dayPhaseAt } from "../lighting/WorldClock";
 import { isLightingQuality } from "../lighting/quality";
 import { hudCameraCenter } from "../rendering/camera";
-import { blockIconUrl } from "../rendering/blockTextures";
+import { itemIconUrl } from "../rendering/blockTextures";
 import { InstallPrompt, isRunningAsApp } from "../pwa/installPrompt";
 import {
   applyOrientation, isOrientationPreference, readOrientationPreference, writeOrientationPreference,
@@ -28,7 +28,7 @@ type TouchDrag = { pointerId: number; x: number; y: number; source: StackSource;
 
 function itemIcon(stack: ItemStack): string {
   const tool = isToolStack(stack);
-  const background = tool ? "" : `background-image: url('${blockIconUrl(ITEM_BLOCKS[stack.itemId])}');`;
+  const background = tool ? "" : `background-image: url('${itemIconUrl(stack.itemId)}');`;
   return `<span class="item-icon">
     <span aria-hidden="true" class="block-swatch ${stack.itemId}${tool ? " tool" : ""}" style="${background} transform: rotate(${stack.rotation ?? 0}deg)"></span>
     ${tool ? `<progress class="item-durability" aria-label="Durabilité de ${ITEM_LABELS[stack.itemId]}" max="${TOOLS[stack.itemId].maxDurability}" value="${stack.durability}"></progress>` : ""}
@@ -165,7 +165,7 @@ export class Application {
             <button id="pause-game">Pause / menu</button>
           </div>
         </header>
-        <p id="play-help" class="play-help" data-camera-edge="top" hidden>A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle · Maj : course ·
+        <p id="play-help" class="play-help" data-camera-edge="top" hidden>A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle / nage · Maj : course · Maintenir une plante : cueillir ·
           Raccourci vide ou outil : maintenir le clic pour miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
           Carrés superposés : choisir le plan · 1–0 : sélection · I : inventaire · G : déposer · Échap : pause<br>
           Tactile : maintenez une case pour miner, touchez-la pour poser. Pincez pour zoomer.</p>
@@ -214,7 +214,7 @@ export class Application {
           <form id="dev-resources" class="dev-form">
             <label for="dev-resource">Ressource</label>
             <select id="dev-resource">
-              <optgroup label="Construction">${BLOCK_ITEMS.map((item) => `<option value="${item}">${ITEM_LABELS[item]}</option>`).join("")}</optgroup>
+              <optgroup label="Matériaux">${MATERIAL_ITEMS.map((item) => `<option value="${item}">${ITEM_LABELS[item]}</option>`).join("")}</optgroup>
               <optgroup label="Outils">${TOOL_ITEMS.map((item) => `<option value="${item}">${ITEM_LABELS[item]}</option>`).join("")}</optgroup>
             </select>
             <label for="dev-quantity">Quantité</label>
@@ -229,10 +229,10 @@ export class Application {
           ${hotbarMarkup("hud-hotbar")}
           <div class="touch-controls" data-camera-edge="bottom">
             <div class="movement-pad" role="group" aria-label="Croix directionnelle">
-              <button data-hold="up" aria-label="Grimper">▲</button>
+              <button data-hold="up" aria-label="Grimper ou nager vers le haut">▲</button>
               <button data-hold="left" aria-label="Aller à gauche">◀</button>
               <button data-hold="right" aria-label="Aller à droite">▶</button>
-              <button data-hold="down" aria-label="Descendre">▼</button>
+              <button data-hold="down" aria-label="Descendre ou nager vers le bas">▼</button>
             </div>
             <div class="action-pad">
               <button data-hold="run">Courrir</button>
@@ -1115,7 +1115,7 @@ export class Application {
     const item = session.selectedItem;
     const stack = session.hotbar[session.selectedSlot];
     const tool = stack && isToolStack(stack) ? stack : null;
-    const mining = item === null || tool !== null;
+    const mining = item === null || !isBlockItem(item);
     const plane = session.selectedPlane;
     const rotation = session.selectedRotation;
     const planeLabel = plane === "foreground" ? "Premier plan" : "Arrière-plan";
@@ -1125,7 +1125,8 @@ export class Application {
     const description = tool
       ? `${ITEM_LABELS[tool.itemId]} · Miner · Plan automatique · ${tool.durability} / ${TOOLS[tool.itemId].maxDurability}`
       : item
-      ? `${ITEM_LABELS[item]} · Poser · ${planeLabel} · ${rotation}°`
+      ? mining ? `${ITEM_LABELS[item]} · Miner à mains nues · Plan automatique`
+        : `${ITEM_LABELS[item]} · Poser · ${planeLabel} · ${rotation}°`
       : "Mains nues · Miner · Plan automatique";
     for (const controls of this.root.querySelectorAll<HTMLElement>(".construction-controls")) {
       const preview = controls.querySelector<HTMLElement>("[data-selection-preview]");
@@ -1148,7 +1149,7 @@ export class Application {
         details.textContent = description;
       }
       for (const button of controls.querySelectorAll<HTMLButtonElement>("[data-rotate]")) {
-        button.disabled = item === null || tool !== null;
+        button.disabled = mining;
       }
       const label = mining
         ? "Minage automatique : premier plan, puis arrière-plan si la cellule est vide au premier plan."

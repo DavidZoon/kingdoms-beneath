@@ -1,9 +1,12 @@
 import { Block, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
+import { BiomeResources, RESOURCE_RULES, V4_RESOURCE_RULES, isLog, type NaturalPickup } from "./BiomeResources";
+import type { ResourceId } from "../world/resources";
 
-export type GeneratorVersion = 1 | 2 | 3;
+export type GeneratorVersion = 1 | 2 | 3 | 4 | 5;
 
 export class WorldGenerator {
   private readonly seedHash: number;
+  private readonly resources: BiomeResources;
 
   constructor(seed: string, readonly version: GeneratorVersion = 2) {
     let hash = 2166136261;
@@ -11,6 +14,9 @@ export class WorldGenerator {
       hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
     }
     this.seedHash = hash;
+    this.resources = new BiomeResources(
+      this, (x, y, salt) => this.noise2D(x, y, salt), version >= 5 ? RESOURCE_RULES : V4_RESOURCE_RULES,
+    );
   }
 
   private noise(index: number, salt: number): number {
@@ -50,8 +56,21 @@ export class WorldGenerator {
     return top * (1 - blendY) + bottom * blendY;
   }
 
-  surfaceAt(x: number): number {
+  private originalSurfaceAt(x: number): number {
     return Math.round(28 + this.smoothNoise(x, 32, 13) * 6 + this.smoothNoise(x, 96, 27) * 7);
+  }
+
+  waterLevelAt(x: number): number | null {
+    if (this.version < 4 || (x >= 0 && x <= 16)) return null;
+    const region = Math.floor(x / 96);
+    const anchor = region * 96 + 32 + Math.floor(this.noise(region, 211) * 32);
+    const width = 4 + Math.floor(this.noise(region, 213) * 5);
+    return Math.abs(x - anchor) <= width ? this.originalSurfaceAt(anchor) : null;
+  }
+
+  surfaceAt(x: number): number {
+    const water = this.waterLevelAt(x);
+    return water === null ? this.originalSurfaceAt(x) : water + 3;
   }
 
   biomeAt(x: number): "forest" | "plain" {
@@ -63,17 +82,20 @@ export class WorldGenerator {
     if (y >= WORLD_HEIGHT - 1) return Block.Bedrock;
     const surface = this.surfaceAt(x);
     if (y === surface) {
+      if ((this.version >= 5 || (this.version === 4 && this.biomeAt(x) === "forest")) && (x < 0 || x > 16) &&
+          this.noise(x, 215) < 0.15) return Block.Dirt;
       return this.version >= 2 && this.biomeAt(x) === "plain" ? Block.Meadow : Block.Grass;
     }
     if (this.version >= 2 && y >= surface + 8 && y < WORLD_HEIGHT - 4 &&
         this.caveNoise(x, y) > 0.62) return Block.Air;
     if (y > surface) return y <= surface + 4 ? Block.Dirt : Block.Stone;
 
+    if (this.version >= 4) return Block.Air;
     for (let region = Math.floor(x / 12) - 1; region <= Math.floor(x / 12) + 1; region++) {
       const anchor = region * 12 + 3 + Math.floor(this.noise(region, 79) * 6);
       if ((anchor >= 3 && anchor <= 13) || this.biomeAt(anchor) !== "forest") continue;
       const top = this.surfaceAt(anchor) - 5 - Math.floor(this.noise(region, 83) * 2);
-      if (x === anchor && y >= top && y < this.surfaceAt(anchor)) return Block.Wood;
+      if (x === anchor && y >= top && y < this.surfaceAt(anchor)) return Block.PineLog;
       if (Math.abs(x - anchor) <= 2 && y >= top - 1 && y <= top + 1) {
         return this.version >= 2 && Math.abs(x - anchor) === 2 ? Block.Branch : Block.Leaves;
       }
@@ -82,27 +104,50 @@ export class WorldGenerator {
   }
 
   blockAt(x: number, y: number): BlockId {
+    if (this.version >= 4) {
+      const block = this.resources.blockAt(x, y);
+      return isLog(block) ? Block.Air : block;
+    }
     const block = this.originalBlockAt(x, y);
-    return this.version === 3 && block === Block.Wood ? Block.Air : block;
+    return this.version === 3 && block === Block.PineLog ? Block.Air : block;
   }
 
   isBackgroundTrunk(x: number, y: number): boolean {
+    if (this.version >= 4) return y >= 0 && y < WORLD_HEIGHT && isLog(this.resources.blockAt(x, y));
     return this.version === 3 && y >= 0 && y < this.surfaceAt(x) &&
-      this.originalBlockAt(x, y) === Block.Wood;
+      this.originalBlockAt(x, y) === Block.PineLog;
   }
 
   isImmutableBackground(x: number, y: number): boolean {
-    return this.version === 3 && Math.abs(x) <= MAX_TILE_X &&
+    return this.version >= 3 && Math.abs(x) <= MAX_TILE_X &&
       y > this.surfaceAt(x) && y < WORLD_HEIGHT;
   }
 
   backgroundAt(x: number, y: number): BlockId {
-    if (this.version !== 3 || Math.abs(x) > MAX_TILE_X || y < 0 || y >= WORLD_HEIGHT) return Block.Air;
+    if (this.version < 3 || Math.abs(x) > MAX_TILE_X || y < 0 || y >= WORLD_HEIGHT) return Block.Air;
+    if (this.version >= 4 && this.isBackgroundTrunk(x, y)) return this.resources.blockAt(x, y);
     const surface = this.surfaceAt(x);
-    if (y < surface) return this.isBackgroundTrunk(x, y) ? Block.Wood : Block.Air;
+    if (y < surface) return this.isBackgroundTrunk(x, y) ? Block.PineLog : Block.Air;
     if (y === surface) return Block.Air;
     const block = this.blockAt(x, y);
+    if (block === Block.Water) return Block.Air;
     return block === Block.Air ? this.nearestGeneratedBlock(x, y, surface) : block;
+  }
+
+  baseBlockAt(x: number, y: number): BlockId {
+    if (Math.abs(x) > MAX_TILE_X || y < 0) return Block.Air;
+    const water = this.waterLevelAt(x);
+    if (water !== null && y >= water && y < this.surfaceAt(x)) return Block.Water;
+    if (water !== null && y === this.surfaceAt(x)) return Block.Dirt;
+    return this.originalBlockAt(x, y);
+  }
+
+  harvestAt(x: number, y: number): readonly ResourceId[] {
+    return this.version >= 4 ? this.resources.harvestAt(x, y) : [];
+  }
+
+  pickupsAt(x: number, y: number): readonly NaturalPickup[] {
+    return this.version >= 4 ? this.resources.pickupsAt(x, y) : [];
   }
 
   private nearestGeneratedBlock(x: number, y: number, surface: number): BlockId {

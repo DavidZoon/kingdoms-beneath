@@ -36,7 +36,7 @@ describe("construction planes", () => {
     session.world.setBlock(x, y, Block.Air);
     session.world.setBackground(x, y - 1, Block.Stone);
     expect(session.place(x, y - 1)).toEqual({ ok: true });
-    expect(session.world.getBlock(x, y - 1)).toBe(Block.Wood);
+    expect(session.world.getBlock(x, y - 1)).toBe(Block.PineLog);
     expect(session.world.getBackground(x, y - 1)).toBe(Block.Stone);
   });
 
@@ -74,9 +74,9 @@ describe("construction planes", () => {
       const session = raySession();
       const otherPlane = plane === "foreground" ? "background" : "foreground";
       session.world.setBlockOnPlane(1, 10, Block.Stone, 0, otherPlane);
-      session.world.setBlockOnPlane(3, 10, Block.Wood, 0, plane);
+      session.world.setBlockOnPlane(3, 10, Block.PineLog, 0, plane);
       expect(session.getMiningTarget(3, 10)).toEqual({ x: 3, y: 10, plane });
-      expect(session.mine(3, 10, 6)).toEqual({ ok: true, destroyed: true });
+      expect(session.mine(3, 10, 8)).toEqual({ ok: true, destroyed: true });
       expect(session.world.getBlockOnPlane(1, 10, otherPlane)).toBe(Block.Stone);
       expect(session.world.getBlockOnPlane(3, 10, plane)).toBe(Block.Air);
     });
@@ -84,8 +84,8 @@ describe("construction planes", () => {
     it("skips immutable natural backgrounds but mines a nearer constructed background", () => {
       const session = raySession();
       session.world.setBackground(1, 10, Block.Stone);
-      session.world.setBackground(2, 10, Block.Wood);
-      session.world.setBackground(3, 10, Block.Wood);
+      session.world.setBackground(2, 10, Block.PineLog);
+      session.world.setBackground(3, 10, Block.PineLog);
       const origin = session.world.getBackgroundOrigin.bind(session.world);
       vi.spyOn(session.world, "getBackgroundOrigin").mockImplementation((x, y) =>
         x === 1 && y === 10 ? "natural" : origin(x, y));
@@ -138,7 +138,7 @@ describe("construction planes", () => {
     session.world.setBackground(x, y, Block.Air);
     session.world.setBlock(x, y - 1, Block.Stone);
     expect(session.place(x, y - 1)).toEqual({ ok: true });
-    expect(session.world.getBackground(x, y - 1)).toBe(Block.Wood);
+    expect(session.world.getBackground(x, y - 1)).toBe(Block.PineLog);
     expect(session.world.getBlock(x, y - 1)).toBe(Block.Stone);
   });
 
@@ -152,21 +152,44 @@ describe("construction planes", () => {
     expect(playerOverlapsSolid(session.world, session.player)).toBe(false);
     session.setHotbarPlane(2, "foreground");
     expect(session.place(8, y)).toMatchObject({ ok: false, reason: expect.stringContaining("personnage") });
-    expect(session.world.getBackground(8, y)).toBe(Block.Wood);
+    expect(session.world.getBackground(8, y)).toBe(Block.PineLog);
     expect(session.world.getBlock(8, y)).toBe(Block.Air);
   });
 
-  it("lets the player walk through a background wall", () => {
-    const session = sessionWithGround();
-    const ground = session.world.generator.surfaceAt(8);
-    session.world.setBackground(9, ground - 2, Block.Stone);
-    session.world.setBackground(9, ground - 1, Block.Stone);
-    for (let tick = 0; tick < 25; tick++) {
-      session.step({ left: false, right: true, up: false, down: false, run: false, jump: false });
-      expect(playerOverlapsSolid(session.world, session.player)).toBe(false);
-    }
-    expect(session.player.x).toBeGreaterThan(9 * TILE_SIZE);
-  });
+  it.each([Block.Dirt, Block.Stone, Block.Clay, Block.Sand, Block.Gravel, Block.Peat])(
+    "supports the player and blocks walking through foreground terrain %s", (block) => {
+      const session = sessionWithGround();
+      const ground = session.world.generator.surfaceAt(8);
+      session.world.setBlock(8, ground, block);
+      const startY = session.player.y;
+      for (let tick = 0; tick < 30; tick++) {
+        session.step({ left: false, right: false, up: false, down: false, run: false, jump: false });
+      }
+      expect(session.player.y).toBe(startY);
+      expect(session.player.grounded).toBe(true);
+      session.world.setBlock(9, ground - 2, block);
+      session.world.setBlock(9, ground - 1, block);
+      for (let tick = 0; tick < 25; tick++) {
+        session.step({ left: false, right: true, up: false, down: false, run: true, jump: false });
+        expect(playerOverlapsSolid(session.world, session.player)).toBe(false);
+      }
+      expect(session.player.x + PLAYER_WIDTH).toBeLessThanOrEqual(9 * TILE_SIZE);
+    },
+  );
+
+  it.each([Block.Dirt, Block.Stone, Block.Clay, Block.Sand, Block.Gravel, Block.Peat])(
+    "lets the player walk through background terrain %s", (block) => {
+      const session = sessionWithGround();
+      const ground = session.world.generator.surfaceAt(8);
+      session.world.setBackground(9, ground - 2, block);
+      session.world.setBackground(9, ground - 1, block);
+      for (let tick = 0; tick < 25; tick++) {
+        session.step({ left: false, right: true, up: false, down: false, run: false, jump: false });
+        expect(playerOverlapsSolid(session.world, session.player)).toBe(false);
+      }
+      expect(session.player.x).toBeGreaterThan(9 * TILE_SIZE);
+    },
+  );
 
   it("ignores an immutable natural background without damage, drops or edits", () => {
     const session = sessionWithGround();
@@ -187,7 +210,7 @@ describe("construction planes", () => {
   it("prioritizes foreground mining and saves damage independently on both planes", () => {
     const session = sessionWithGround();
     const { x, y } = target(session);
-    session.world.setBackground(x, y, Block.Wood, 90);
+    session.world.setBackground(x, y, Block.PineLog, 90);
     session.selectHotbar(1);
     expect(session.mine(x, y, 2)).toEqual({ ok: true, destroyed: false });
     session.world.setBlock(x, y, Block.Stone);
@@ -201,13 +224,13 @@ describe("construction planes", () => {
     expect(restored.world.getBackgroundRotation(x, y)).toBe(90);
     expect(restored.mine(x, y, 11)).toEqual({ ok: true, destroyed: true });
     expect(restored.world.getBlock(x, y)).toBe(Block.Air);
-    expect(restored.world.getBackground(x, y)).toBe(Block.Wood);
+    expect(restored.world.getBackground(x, y)).toBe(Block.PineLog);
     expect(restored.getBlockDamage(x, y, "background")).toBe(2);
-    expect(restored.mine(x, y, 4)).toEqual({ ok: true, destroyed: true });
+    expect(restored.mine(x, y, 6)).toEqual({ ok: true, destroyed: true });
     expect(restored.world.getBackground(x, y)).toBe(Block.Air);
     expect(restored.getBlockDamage(x, y, "foreground")).toBe(0);
     expect(restored.hotbar[2]?.quantity).toBe(25);
-    expect(restored.inventory.wood).toBe(0);
+    expect(restored.inventory.pine_log).toBe(0);
   });
 
   it("harvests natural trunks and does not restore them after rebuilding and reloading", () => {
@@ -215,7 +238,8 @@ describe("construction planes", () => {
     let trunk: { x: number; y: number } | null = null;
     for (let x = 14; x <= 300 && !trunk; x++) {
       const y = session.world.generator.surfaceAt(x) - 1;
-      if (session.world.getBackgroundOrigin(x, y) === "trunk") trunk = { x, y };
+      if (session.world.getBackgroundOrigin(x, y) === "trunk" &&
+          session.world.getBackground(x, y) === Block.PineLog) trunk = { x, y };
     }
     if (!trunk) throw new Error("No generated trunk found.");
     const { x, y } = trunk;
@@ -229,9 +253,9 @@ describe("construction planes", () => {
       }
     }
     expect(session.getMiningTarget(x, y)).toEqual({ x, y, plane: "background" });
-    expect(session.mine(x, y, 6)).toEqual({ ok: true, destroyed: true });
+    expect(session.mine(x, y, 8)).toEqual({ ok: true, destroyed: true });
     expect(session.hotbar[2]?.quantity).toBe(25);
-    expect(session.inventory.wood).toBe(0);
+    expect(session.inventory.pine_log).toBe(0);
     expect(session.world.getBlock(x, y)).toBe(Block.Air);
     expect(session.world.getBackground(x, y)).toBe(Block.Air);
     session.selectHotbar(2);
@@ -240,12 +264,12 @@ describe("construction planes", () => {
     expect(session.place(x, y)).toEqual({ ok: true });
     expect(session.world.getBackgroundOrigin(x, y)).toBe("placed");
     session.selectHotbar(1);
-    expect(session.mine(x, y, 6)).toEqual({ ok: true, destroyed: true });
+    expect(session.mine(x, y, 8)).toEqual({ ok: true, destroyed: true });
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     expect(restored.world.getBackground(x, y)).toBe(Block.Air);
     expect(restored.world.backgroundEdits).toContainEqual({ x, y, block: Block.Air });
     expect(restored.hotbar[2]?.quantity).toBe(25);
-    expect(restored.inventory.wood).toBe(0);
+    expect(restored.inventory.pine_log).toBe(0);
   });
 
   it("keeps plan choices on slots and automatically adjusts incompatible incoming stacks", () => {
