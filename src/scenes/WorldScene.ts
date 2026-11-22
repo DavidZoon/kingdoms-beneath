@@ -668,6 +668,12 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawLighting(left: number, top: number, width: number, height: number): void {
+    if (!this.session.lightEnabled) {
+      if (this.lightRenderKey === "disabled") return;
+      this.lightRenderKey = "disabled";
+      this.lighting.clear();
+      return;
+    }
     const minX = Math.floor(left / TILE_SIZE);
     const maxX = Math.floor((left + width) / TILE_SIZE);
     const topCell = Math.floor(top / TILE_SIZE);
@@ -681,7 +687,7 @@ export class WorldScene extends Phaser.Scene {
     const revision = this.session.world.foregroundRevision;
     const carried = carriedTorchSource(this.session.player, this.session.selectedItem);
     const carriedKey = carried ? `${carried.x},${carried.y},${carried.range}` : "";
-    const renderKey = `${boundsKey},${topCell},${bottomCell},${revision},${quality},${daylightStep},${carriedKey}`;
+    const renderKey = `${boundsKey},${topCell},${bottomCell},${revision},${quality},${daylightStep},${carriedKey},enabled`;
     if (renderKey === this.lightRenderKey) return;
     this.lightRenderKey = renderKey;
     this.lighting.clear();

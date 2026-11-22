@@ -1,4 +1,4 @@
-import { Block, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
+import { Block, BLOCKS, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
 import { BiomeResources, RESOURCE_RULES, V4_RESOURCE_RULES, V7_RESOURCE_RULES, isLog, type NaturalPickup } from "./BiomeResources";
 import { CAVE_FEATURE_ODDS, type CaveFeatureOdds } from "./BiomeResources";
 import type { ResourceId } from "../world/resources";
@@ -169,17 +169,37 @@ export class WorldGenerator {
   caveChestAt(x: number, y: number): "smallChest" | "mediumChest" | "largeChest" | null {
     if (this.version < 8 || y < this.surfaceAt(x) + 8 || y >= WORLD_HEIGHT - 2 ||
         this.resources.blockAt(x, y) !== Block.Air) return null;
+    if (!BLOCKS[this.resources.blockAt(x, y + 1)].solid) return null;
     const odds = this.caveOddsAt(x);
     const roll = this.noise2D(x, y, 701);
-    if (roll < odds.largeChest) return "largeChest";
-    if (roll < odds.largeChest + odds.mediumChest) return "mediumChest";
-    if (roll < odds.largeChest + odds.mediumChest + odds.smallChest) return "smallChest";
-    return null;
+    const candidate = roll < odds.largeChest ? "largeChest" as const
+      : roll < odds.largeChest + odds.mediumChest ? "mediumChest" as const
+      : roll < odds.largeChest + odds.mediumChest + odds.smallChest ? "smallChest" as const
+      : null;
+    if (!candidate) return null;
+    const priority = this.noise2D(x, y, 702);
+    for (let dy = -9; dy <= 9; dy++) {
+      for (let dx = -9; dx <= 9; dx++) {
+        if ((dx === 0 && dy === 0) || dx * dx + dy * dy >= 100) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (ny < 0 || ny >= WORLD_HEIGHT - 2 || ny < this.surfaceAt(nx) + 8 ||
+            this.resources.blockAt(nx, ny) !== Block.Air ||
+            !BLOCKS[this.resources.blockAt(nx, ny + 1)].solid) continue;
+        const neighborOdds = this.caveOddsAt(nx);
+        const neighborRoll = this.noise2D(nx, ny, 701);
+        if (neighborRoll >= neighborOdds.largeChest + neighborOdds.mediumChest + neighborOdds.smallChest) continue;
+        const neighborPriority = this.noise2D(nx, ny, 702);
+        if (neighborPriority < priority || (neighborPriority === priority &&
+            (ny < y || (ny === y && nx < x)))) return null;
+      }
+    }
+    return candidate;
   }
 
   caveMonsterAt(x: number, y: number): boolean {
     if (this.version < 8 || y < this.surfaceAt(x) + 8 ||
-        y >= WORLD_HEIGHT - 2 || this.resources.blockAt(x, y) !== Block.Air) return false;
+        y >= WORLD_HEIGHT - 2 || !this.hasMonsterSpawnSpace(x, y)) return false;
     const odds = this.caveOddsAt(x);
     let nearbyChest = false;
     for (let dy = -6; dy <= 6 && !nearbyChest; dy++) {
@@ -191,6 +211,12 @@ export class WorldGenerator {
       }
     }
     return this.noise2D(x, y, 809) < (nearbyChest ? odds.monsterWithChest : odds.monster);
+  }
+
+  hasMonsterSpawnSpace(x: number, y: number): boolean {
+    return this.blockAt(x, y) === Block.Air &&
+      this.blockAt(x, y + 1) === Block.Air &&
+      BLOCKS[this.blockAt(x, y + 2)].solid;
   }
 
   private nearestGeneratedBlock(x: number, y: number, surface: number): BlockId {

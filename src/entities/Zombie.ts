@@ -143,7 +143,9 @@ export function spawnZombie(world: WorldModel, player: PlayerState, direction: -
   if (Math.abs(xTile) > MAX_TILE_X) return null;
   const surface = world.generator.surfaceAt(xTile);
   const x = xTile * TILE_SIZE + 2;
-  const y = surface * TILE_SIZE - ZOMBIE_HEIGHT;
+  const spawnTileY = surface - 2;
+  if (!world.generator.hasMonsterSpawnSpace(xTile, spawnTileY)) return null;
+  const y = spawnTileY * TILE_SIZE + (2 * TILE_SIZE - ZOMBIE_HEIGHT);
   if (overlapsSolid(world, x, y) || !BLOCKS[world.getBlock(xTile, surface)].solid) return null;
   return {
     id, x, y, vx: 0, vy: 0, health: ZOMBIE_MAX_HEALTH, grounded: true, attackCooldown: 0,

@@ -56,6 +56,16 @@ function plantSession() {
 }
 
 describe("first playable session", () => {
+  it("persists the DEV visibility override independently from lighting quality", () => {
+    const session = flatSession();
+    expect(session.lightEnabled).toBe(true);
+    session.lightEnabled = false;
+    session.lightingQuality = "reduced";
+    const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
+    expect(restored.lightEnabled).toBe(false);
+    expect(restored.lightingQuality).toBe("reduced");
+  });
+
   it("consumes fruits and raw fish to restore health without exceeding maximum", () => {
     const session = flatSession();
     session.survival.health = 50;

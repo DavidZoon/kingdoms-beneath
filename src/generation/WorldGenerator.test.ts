@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorldGenerator } from "./WorldGenerator";
-import { Block, CHUNK_SIZE, MAX_TILE_X, WORLD_HEIGHT } from "../world/blocks";
+import { Block, BLOCKS, CHUNK_SIZE, MAX_TILE_X, WORLD_HEIGHT } from "../world/blocks";
 import { BiomeResources, FOREST_RESOURCES, V4_RESOURCE_RULES, blobSize } from "./BiomeResources";
 
 describe("versioned world generation", () => {
@@ -222,6 +222,42 @@ describe("versioned world generation", () => {
     expect(generator.blockAt(foundChest.x, foundChest.y)).not.toBe(Block.Air);
     const odds = generator.caveOddsAt(foundChest.x);
     expect(odds.monsterWithChest).toBeGreaterThan(odds.monster);
+  });
+
+  it("spawns cave monsters only in one-by-two foreground air columns with a floor", () => {
+    const generator = new WorldGenerator("monster-space", 8);
+    let checked = 0;
+    for (let x = -500; x <= 500; x++) {
+      for (let y = 40; y < WORLD_HEIGHT - 3; y++) {
+        if (!generator.caveMonsterAt(x, y)) continue;
+        expect(generator.blockAt(x, y)).toBe(Block.Air);
+        expect(generator.blockAt(x, y + 1)).toBe(Block.Air);
+        expect(BLOCKS[generator.blockAt(x, y + 2)].solid).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("places cave chests only on foreground supports with at least ten blocks between chests", () => {
+    const generator = new WorldGenerator("spaced-chests", 8);
+    const found: Array<{ x: number; y: number }> = [];
+    for (let x = -600; x <= 600; x++) {
+      for (let y = 40; y < WORLD_HEIGHT - 2; y++) {
+        if (!generator.caveChestAt(x, y)) continue;
+        expect(BLOCKS[generator.blockAt(x, y + 1)].solid).toBe(true);
+        found.push({ x, y });
+      }
+    }
+    expect(found.length).toBeGreaterThan(0);
+    for (let first = 0; first < found.length; first++) {
+      for (let second = first + 1; second < found.length; second++) {
+        expect(Math.hypot(
+          found[first].x - found[second].x,
+          found[first].y - found[second].y,
+        )).toBeGreaterThanOrEqual(10);
+      }
+    }
   });
 
   it("chooses the nearest generated foreground block by Euclidean distance", () => {

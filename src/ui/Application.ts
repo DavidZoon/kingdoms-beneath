@@ -249,6 +249,8 @@ export class Application {
             <button id="close-dev" aria-label="Fermer le menu DEV">Fermer</button>
           </div>
           <p>Ajouter des ressources à l'inventaire, dans la limite des emplacements disponibles.</p>
+          <label class="option-toggle dev-light-toggle"><input id="dev-light-enabled" type="checkbox">
+            Gestion de la lumière <span>(désactiver rend tout le monde visible)</span></label>
           <form id="dev-resources" class="dev-form">
             <p id="dev-gallery-label">Ressources, outils et armes</p>
             <div id="dev-gallery" class="inventory-slots dev-gallery" role="group" aria-labelledby="dev-gallery-label">
@@ -507,6 +509,13 @@ export class Application {
     this.element("close-inventory").addEventListener("click", () => this.toggleInventory(false));
     this.element("open-dev").addEventListener("click", () => this.toggleDev());
     this.element("close-dev").addEventListener("click", () => this.toggleDev(false));
+    this.element("dev-light-enabled").addEventListener("change", (event) => {
+      if (!this.session || !(event.target instanceof HTMLInputElement)) return;
+      this.session.lightEnabled = event.target.checked;
+      this.element("action-message").textContent = this.session.lightEnabled
+        ? "Gestion de la lumière activée." : "Gestion de la lumière désactivée : tout le monde est visible.";
+      this.updateHud();
+    });
     this.element("open-chest").addEventListener("click", () => this.toggleChest(true));
     this.element("close-chest").addEventListener("click", () => this.toggleChest(false));
     this.element("chest-panel").addEventListener("click", (event) => {
@@ -1598,6 +1607,8 @@ export class Application {
     }
     const { player, world, inventory, selectedSlot, hotbar } = this.session;
     this.element("open-dev").hidden = !this.session.creativeMode;
+    const devLight = this.element("dev-light-enabled");
+    if (devLight instanceof HTMLInputElement) devLight.checked = this.session.lightEnabled;
     const creative = this.element("creative-mode");
     if (creative instanceof HTMLInputElement) {
       creative.checked = this.session.creativeMode;

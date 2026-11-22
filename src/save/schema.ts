@@ -406,6 +406,10 @@ export function validateSave(value: unknown): SaveGame {
   });
   const lightingQuality = hasLighting ? value.lightingQuality : "standard";
   if (!isLightingQuality(lightingQuality)) throw new SaveValidationError("Qualité d'éclairage invalide.");
+  const lightEnabled = value.lightEnabled ?? true;
+  if (typeof lightEnabled !== "boolean") {
+    throw new SaveValidationError("Option de gestion de lumière invalide.");
+  }
   const rawCollected = hasResources ? value.collectedNaturalPickups : [];
   if (!Array.isArray(rawCollected) || rawCollected.length > MAX_EDITS) {
     throw new SaveValidationError("Liste de récoltes naturelles invalide.");
@@ -581,7 +585,7 @@ export function validateSave(value: unknown): SaveGame {
     },
     inventory: validatedInventory,
     hotbar, hotbarPlanes, selectedSlot, crafting, edits, backgroundEdits,
-    groundDrops, creativeMode, blockDamage, lightingQuality,
+    groundDrops, creativeMode, blockDamage, lightingQuality, lightEnabled,
     collectedNaturalPickups: [...collected].sort(),
     collectedPlants: [...collectedPlants].sort(),
     difficulty, survival, zombies, nightWave, chests,

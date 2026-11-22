@@ -34,6 +34,7 @@ export interface SaveGame {
   creativeMode: boolean;
   blockDamage: BlockDamage[];
   lightingQuality: LightingQuality;
+  lightEnabled: boolean;
   difficulty: DifficultyId;
   survival: SurvivalState;
   zombies: ZombieState[];

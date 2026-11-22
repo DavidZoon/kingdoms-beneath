@@ -112,6 +112,7 @@ export class GameSession {
   crafting: CraftJob | null;
   tick: number;
   lightingQuality: LightingQuality;
+  lightEnabled: boolean;
   difficulty: DifficultyId;
   readonly survival: SurvivalState;
   readonly zombies: ZombieState[];
@@ -136,6 +137,7 @@ export class GameSession {
     this.crafting = save.crafting ? { ...save.crafting } : null;
     this.tick = save.tick;
     this.lightingQuality = save.lightingQuality;
+    this.lightEnabled = save.lightEnabled ?? true;
     this.difficulty = save.difficulty;
     this.survival = {
       ...save.survival,
@@ -207,6 +209,7 @@ export class GameSession {
       blockDamage: [],
       creativeMode: false,
       lightingQuality: "standard",
+      lightEnabled: true,
     });
   }
 
@@ -1446,6 +1449,7 @@ export class GameSession {
       blockDamage: Array.from(this.damage.values(), (entry) => ({ ...entry })),
       creativeMode: this.creative,
       lightingQuality: this.lightingQuality,
+      lightEnabled: this.lightEnabled,
     };
   }
 }

@@ -156,6 +156,7 @@ describe("local save file validation", () => {
     ["creativeMode", "yes"],
     ["blockDamage", null],
     ["lightingQuality", "ultra"],
+    ["lightEnabled", "yes"],
     ["collectedPlants", undefined],
   ])("rejects invalid %s without filling in defaults", (key, value) => {
     expect(() => validateSave({ ...fixture(), [key]: value })).toThrow();
