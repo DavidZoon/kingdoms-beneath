@@ -157,6 +157,28 @@ describe("versioned world generation", () => {
     expect(new WorldGenerator("two-layers", 1).backgroundAt(0, 50)).toBe(Block.Air);
   });
 
+  it.each(["forest", "plain"] as const)("uses only depth-based dirt then stone backgrounds in %s for v6", (biome) => {
+    const generator = new WorldGenerator(`background-${biome}`, 6);
+    vi.spyOn(generator, "surfaceAt").mockReturnValue(30);
+    vi.spyOn(generator, "biomeAt").mockReturnValue(biome);
+    vi.spyOn(generator, "isBackgroundTrunk").mockReturnValue(false);
+    vi.spyOn(generator, "blockAt").mockReturnValue(Block.GoldOre);
+    expect(generator.backgroundAt(0, 30)).toBe(Block.Dirt);
+    expect(generator.isImmutableBackground(0, 30)).toBe(true);
+    expect(generator.backgroundAt(0, 31)).toBe(Block.Dirt);
+    expect(generator.backgroundAt(0, 34)).toBe(Block.Dirt);
+    expect(generator.backgroundAt(0, 35)).toBe(Block.Stone);
+    expect(generator.backgroundAt(30, 70)).toBe(Block.Stone);
+  });
+
+  it("preserves the older mixed natural background for v5 saves", () => {
+    const generator = new WorldGenerator("background-v5", 5);
+    vi.spyOn(generator, "surfaceAt").mockReturnValue(30);
+    vi.spyOn(generator, "isBackgroundTrunk").mockReturnValue(false);
+    vi.spyOn(generator, "blockAt").mockReturnValue(Block.GoldOre);
+    expect(generator.backgroundAt(0, 35)).toBe(Block.GoldOre);
+  });
+
   it("chooses the nearest generated foreground block by Euclidean distance", () => {
     const generator = new WorldGenerator("distance", 3);
     vi.spyOn(generator, "surfaceAt").mockReturnValue(28);

@@ -23,7 +23,7 @@ import {
   PLAYER_MAX_HEALTH, RESPAWN_INVULNERABILITY_TICKS, RESPAWN_TICKS, type SurvivalState,
 } from "../survival/SurvivalState";
 import {
-  spawnZombie, stepZombie, zombieOverlapsTile,
+  ZOMBIE_HEIGHT, ZOMBIE_WIDTH, separateZombies, spawnZombie, stepZombie, zombieOverlapsTile,
   type NightWaveState, type ZombieState,
 } from "../entities/Zombie";
 import { DAY_LENGTH_TICKS, dayPhaseAt } from "../lighting/WorldClock";
@@ -73,6 +73,7 @@ export class GameSession {
   private readonly header: SaveGame;
   private readonly damage = new Map<string, BlockDamage>();
   private creative: boolean;
+  private attackCooldown = 0;
 
   constructor(save: SaveGame) {
     this.header = save;
@@ -97,11 +98,11 @@ export class GameSession {
   }
 
   static create(name: string, seed: string, now = Date.now()): GameSession {
-    const world = new WorldModel(seed, [], 5);
+    const world = new WorldModel(seed, [], 6);
     return new GameSession({
       format: "kingdoms-beneath",
-      schemaVersion: 12,
-      generatorVersion: 5,
+      schemaVersion: 13,
+      generatorVersion: 6,
       id: crypto.randomUUID(),
       name,
       seed,
@@ -111,11 +112,13 @@ export class GameSession {
       player: {
         x: 8 * TILE_SIZE,
         y: world.generator.surfaceAt(8) * TILE_SIZE - PLAYER_HEIGHT,
-        vx: 0, vy: 0, grounded: true, climbing: false,
+        vx: 0, vy: 0, grounded: true, climbing: false, facing: 1,
       },
       inventory: emptyInventory(),
       hotbar: [
-        { itemId: "dirt", quantity: 12 }, null, { itemId: "pine_log", quantity: 24 },
+        { itemId: "dirt", quantity: 12 },
+        { itemId: "woodSword", quantity: 1, durability: TOOLS.woodSword.maxDurability },
+        { itemId: "pine_log", quantity: 24 },
         { itemId: "ladder", quantity: 6 }, { itemId: "torch", quantity: 4 },
         null, null, null, null, null,
       ],
@@ -423,6 +426,12 @@ export class GameSession {
     return this.damage.get(damageKey(x, y, plane))?.damage ?? 0;
   }
 
+  miningMaterialLabel(x: number, y: number, plane: ConstructionPlane): string {
+    const block = this.world.getBlockOnPlane(x, y, plane);
+    const item = BLOCKS[block].drop;
+    return item ? ITEM_LABELS[item] : "Bloc";
+  }
+
   takeDamage(amount: number): boolean {
     if (this.difficulty === "creative" || this.survival.dead || this.survival.invulnerabilityTicks > 0 ||
         !Number.isSafeInteger(amount) || amount <= 0) return false;
@@ -571,6 +580,7 @@ export class GameSession {
     for (const zombie of this.zombies) {
       damage = Math.max(damage, stepZombie(this.world, zombie, this.player, DIFFICULTIES[this.difficulty]).damage);
     }
+    separateZombies(this.world, this.zombies);
     if (damage > 0) this.takeDamage(damage);
   }
 
@@ -603,7 +613,58 @@ export class GameSession {
     return { ok: true, killed };
   }
 
+  private canSeeZombie(zombie: ZombieState): boolean {
+    const x = Math.floor((zombie.x + ZOMBIE_WIDTH / 2) / TILE_SIZE);
+    const y = Math.floor((zombie.y + ZOMBIE_HEIGHT / 2) / TILE_SIZE);
+    const visible = this.traceTarget(x, y, "foreground");
+    return visible.x === x && visible.y === y;
+  }
+
+  attackForward():
+    { ok: true; hit: boolean; killed: boolean; damage: number; toolBroken?: boolean } |
+    { ok: false; reason: string } {
+    if (this.survival.dead) {
+      return { ok: false, reason: "Vous ne pouvez pas attaquer pendant la réapparition." };
+    }
+    if (this.attackCooldown > 0) {
+      return { ok: false, reason: "Attaque en récupération." };
+    }
+    this.attackCooldown = 18;
+    const stack = this.hotbar[this.selectedSlot];
+    const equipment = stack && isToolStack(stack) ? TOOLS[stack.itemId] : null;
+    const damage = equipment?.attackDamage ?? 1;
+    const range = equipment?.attackRange ?? 16;
+    const facing = this.player.facing ?? 1;
+    const originX = this.player.x + PLAYER_WIDTH / 2;
+    const originY = this.player.y + PLAYER_HEIGHT / 2;
+    const target = this.zombies
+      .map((zombie) => ({
+        zombie,
+        distance: (zombie.x + ZOMBIE_WIDTH / 2 - originX) * facing,
+      }))
+      .filter(({ zombie, distance }) =>
+        distance >= 0 && distance <= range && Math.abs(zombie.y + ZOMBIE_HEIGHT / 2 - originY) <= 20 &&
+        this.canSeeZombie(zombie))
+      .sort((a, b) => a.distance - b.distance)[0]?.zombie;
+    if (!target) return { ok: true, hit: false, killed: false, damage };
+    target.health = Math.max(0, target.health - damage);
+    const killed = target.health === 0;
+    if (killed) {
+      const index = this.zombies.indexOf(target);
+      if (index >= 0) this.zombies.splice(index, 1);
+    }
+    if (stack && isToolStack(stack)) {
+      stack.durability--;
+      if (stack.durability === 0) {
+        this.hotbar[this.selectedSlot] = null;
+        return { ok: true, hit: true, killed, damage, toolBroken: true };
+      }
+    }
+    return { ok: true, hit: true, killed, damage };
+  }
+
   step(input: MovementInput): void {
+    this.attackCooldown = Math.max(0, this.attackCooldown - 1);
     if (this.survival.invulnerabilityTicks > 0) this.survival.invulnerabilityTicks--;
     if (this.survival.dead) {
       this.survival.respawnTicks = Math.max(0, this.survival.respawnTicks - 1);

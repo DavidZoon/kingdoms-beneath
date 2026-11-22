@@ -21,7 +21,7 @@ export const RESOURCES = {
   cactus_flesh: { label: "Chair de cactus", planes: ["foreground"], isBlock: false, color: "#5DA130", solid: false, durability: 0, opacity: false },
   clay: { label: "Argile", planes: ["foreground", "background"], isBlock: true, block: 19, color: "#B8735F", solid: true, durability: 5, opacity: true },
   sand: { label: "Sable", planes: ["foreground", "background"], isBlock: true, block: 20, color: "#D9C27A", solid: true, durability: 2, opacity: false },
-  gravel: { label: "Gravier", planes: ["foreground", "background"], isBlock: true, block: 21, color: "#8E8E8E", solid: true, durability: 4, opacity: false },
+  gravel: { label: "Gravier", planes: ["foreground", "background"], isBlock: true, block: 21, color: "#8E8E8E", solid: true, durability: 4, opacity: true },
   peat: { label: "Tourbe", planes: ["foreground", "background"], isBlock: true, block: 22, color: "#4A3428", solid: true, durability: 3, opacity: true },
   salt_crystal: { label: "Cristal de sel", planes: ["foreground"], isBlock: true, block: 23, color: "#F8F8F8", solid: true, durability: 6, opacity: false },
   limestone: { label: "Calcaire", planes: ["foreground", "background"], isBlock: true, block: 24, color: "#D9D2C3", solid: true, durability: 10, opacity: true },

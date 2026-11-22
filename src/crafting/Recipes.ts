@@ -4,6 +4,7 @@ import type { MaterialItemId, ItemId, StationId } from "../world/blocks";
 export const RECIPE_IDS = [
   "torch", "ladder", "woodStairs", "stoneStairs", "stonePickaxe",
   "workbench", "furnace", "copperIngot", "copperPickaxe", "forge", "ironIngot", "ironPickaxe",
+  "woodSword", "copperSword", "ironSword",
 ] as const;
 export type RecipeId = (typeof RECIPE_IDS)[number];
 export const MAX_CRAFT_QUANTITY = ITEM_CAPACITY;
@@ -65,6 +66,18 @@ export const RECIPES: Record<RecipeId, Recipe> = {
   ironPickaxe: {
     id: "ironPickaxe", output: "ironPickaxe", outputPerRecipe: 1,
     materials: { pine_log: 1, iron_ingot: 3 }, ticksPerItem: 360, station: "forge",
+  },
+  woodSword: {
+    id: "woodSword", output: "woodSword", outputPerRecipe: 1,
+    materials: { pine_log: 2 }, ticksPerItem: 180, station: "workbench",
+  },
+  copperSword: {
+    id: "copperSword", output: "copperSword", outputPerRecipe: 1,
+    materials: { pine_log: 1, copper_ingot: 2 }, ticksPerItem: 240, station: "workbench",
+  },
+  ironSword: {
+    id: "ironSword", output: "ironSword", outputPerRecipe: 1,
+    materials: { pine_log: 1, iron_ingot: 3 }, ticksPerItem: 300, station: "forge",
   },
 };
 

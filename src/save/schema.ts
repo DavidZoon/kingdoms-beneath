@@ -44,13 +44,14 @@ function text(value: unknown, max: number): value is string {
 }
 
 function itemAvailableInVersion(itemId: ItemId, version: unknown): boolean {
-  if (itemId === "copperPickaxe" || itemId === "ironPickaxe") return integer(version, 11, 12);
+  if (itemId === "woodSword" || itemId === "copperSword" || itemId === "ironSword") return version === 13;
+  if (itemId === "copperPickaxe" || itemId === "ironPickaxe") return integer(version, 11, 13);
   if (itemId === "workbench" || itemId === "furnace" || itemId === "forge" ||
-      itemId === "copper_ingot" || itemId === "iron_ingot") return integer(version, 11, 12);
-  if (isToolItem(itemId)) return integer(version, 8, 12);
-  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 12);
-  if (itemId === "torch") return integer(version, 4, 12);
-  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 12);
+      itemId === "copper_ingot" || itemId === "iron_ingot") return integer(version, 11, 13);
+  if (isToolItem(itemId)) return integer(version, 8, 13);
+  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 13);
+  if (itemId === "torch") return integer(version, 4, 13);
+  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 13);
 }
 
 function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean, location = "objet"): ItemStack {
@@ -73,6 +74,13 @@ function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean,
 }
 
 export function validateSave(value: unknown): SaveGame {
+  if (record(value) && integer(value.schemaVersion, 1, 12) && Array.isArray(value.hotbar)) {
+    value = {
+      ...value,
+      hotbar: value.hotbar.map((stack) =>
+        record(stack) && stack.itemId === "woodSword" ? null : stack),
+    };
+  }
   if (record(value) && integer(value.schemaVersion, 1, 8)) {
     const migrateStack = (stack: unknown): unknown =>
       record(stack) && stack.itemId === "wood" ? { ...stack, itemId: "pine_log" } : stack;
@@ -93,17 +101,20 @@ export function validateSave(value: unknown): SaveGame {
   const current = (value.schemaVersion === 2 || value.schemaVersion === 3 ||
     value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 ||
     value.schemaVersion === 7 || value.schemaVersion === 8 || value.schemaVersion === 9 ||
-    value.schemaVersion === 10 || value.schemaVersion === 11 || value.schemaVersion === 12) &&
+    value.schemaVersion === 10 || value.schemaVersion === 11 || value.schemaVersion === 12 ||
+    value.schemaVersion === 13) &&
     (value.generatorVersion === 1 || value.generatorVersion === 2 ||
-      (integer(value.schemaVersion, 7, 12) && value.generatorVersion === 3) ||
-      (integer(value.schemaVersion, 9, 12) && value.generatorVersion === 4) ||
-      (integer(value.schemaVersion, 10, 12) && value.generatorVersion === 5));
+      (integer(value.schemaVersion, 7, 13) && value.generatorVersion === 3) ||
+      (integer(value.schemaVersion, 9, 13) && value.generatorVersion === 4) ||
+      (integer(value.schemaVersion, 10, 13) && value.generatorVersion === 5) ||
+      (value.schemaVersion === 13 && value.generatorVersion === 6));
   if (!legacy && !current) {
     throw new SaveValidationError("Version de sauvegarde ou de générateur non prise en charge.");
   }
-  const hasSurvival = value.schemaVersion === 12;
-  const hasAdvancedCrafting = integer(value.schemaVersion, 11, 12);
-  const hasResources = integer(value.schemaVersion, 9, 12);
+  const hasSurvival = integer(value.schemaVersion, 12, 13);
+  const hasAdvancedCrafting = integer(value.schemaVersion, 11, 13);
+  const hasCombatWeapons = value.schemaVersion === 13;
+  const hasResources = integer(value.schemaVersion, 9, 13);
   const hasTools = value.schemaVersion === 8 || hasResources;
   const hasLayers = value.schemaVersion === 7 || hasTools;
   const hasRotations = value.schemaVersion === 6 || hasLayers;
@@ -127,10 +138,13 @@ export function validateSave(value: unknown): SaveGame {
   const playerVy = player.vy;
   const grounded = player.grounded;
   const climbing = legacy && player.climbing === undefined ? false : player.climbing;
+  const facing = player.facing ?? 1;
   if (!finite(playerX, -MAX_TILE_X * TILE_SIZE, MAX_TILE_X * TILE_SIZE - PLAYER_WIDTH) ||
       !finite(playerY, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - PLAYER_HEIGHT) ||
       !finite(playerVx, -135, 135) || !finite(playerVy, -245, 400) ||
-      typeof grounded !== "boolean" || typeof climbing !== "boolean") {
+      typeof grounded !== "boolean" || typeof climbing !== "boolean" ||
+      (facing !== -1 && facing !== 1) ||
+      (hasCombatWeapons && player.facing === undefined)) {
     throw new SaveValidationError("État du joueur invalide.");
   }
   const inventory = value.inventory;
@@ -229,6 +243,7 @@ export function validateSave(value: unknown): SaveGame {
           (!hasAdvancedCrafting && RECIPES[job.recipeId].station !== null) ||
           (!hasAdvancedCrafting && ["workbench", "furnace", "copperIngot", "copperPickaxe",
             "forge", "ironIngot", "ironPickaxe"].includes(job.recipeId)) ||
+          (!hasCombatWeapons && ["woodSword", "copperSword", "ironSword"].includes(job.recipeId)) ||
           (!hasTools && job.recipeId === "stonePickaxe") ||
           typeof job.quantity !== "number" || !validCraftQuantity(RECIPES[job.recipeId], job.quantity) ||
           !integer(job.completed, 0, job.quantity - 1) ||
@@ -305,7 +320,8 @@ export function validateSave(value: unknown): SaveGame {
     return { x: edit.x, y: edit.y, block: edit.block, ...(rotation !== 0 ? { rotation } : {}) };
   });
   const generatorVersion = value.generatorVersion === 1 ? 1 : value.generatorVersion === 2 ? 2 :
-    value.generatorVersion === 3 ? 3 : value.generatorVersion === 4 ? 4 : 5;
+    value.generatorVersion === 3 ? 3 : value.generatorVersion === 4 ? 4 :
+      value.generatorVersion === 5 ? 5 : 6;
   const generatedWorld = new WorldModel(value.seed, edits, generatorVersion);
   const rawBackgroundEdits = hasLayers ? value.backgroundEdits : [];
   if (!Array.isArray(rawBackgroundEdits) || edits.length + rawBackgroundEdits.length > MAX_EDITS) {
@@ -377,7 +393,7 @@ export function validateSave(value: unknown): SaveGame {
     }
     collected.add(id);
   }
-  const rawPlants = integer(value.schemaVersion, 10, 12) ? value.collectedPlants : [];
+  const rawPlants = integer(value.schemaVersion, 10, 13) ? value.collectedPlants : [];
   if (!Array.isArray(rawPlants) || rawPlants.length > MAX_EDITS) {
     throw new SaveValidationError("Liste de plantes récoltées invalide.");
   }
@@ -466,12 +482,12 @@ export function validateSave(value: unknown): SaveGame {
     nextSpawnTick: rawNightWave.nextSpawnTick,
   };
   const result: SaveGame = {
-    format: "kingdoms-beneath", schemaVersion: 12, generatorVersion,
+    format: "kingdoms-beneath", schemaVersion: 13, generatorVersion,
     id: value.id, name: value.name, seed: value.seed,
     createdAt: value.createdAt, updatedAt: value.updatedAt, tick: value.tick,
     player: {
       x: playerX, y: playerY, vx: playerVx, vy: playerVy,
-      grounded, climbing,
+      grounded, climbing, facing,
     },
     inventory: validatedInventory,
     hotbar, hotbarPlanes, selectedSlot, crafting, edits, backgroundEdits,

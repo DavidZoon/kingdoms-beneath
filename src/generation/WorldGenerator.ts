@@ -2,7 +2,7 @@ import { Block, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
 import { BiomeResources, RESOURCE_RULES, V4_RESOURCE_RULES, isLog, type NaturalPickup } from "./BiomeResources";
 import type { ResourceId } from "../world/resources";
 
-export type GeneratorVersion = 1 | 2 | 3 | 4 | 5;
+export type GeneratorVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 export class WorldGenerator {
   private readonly seedHash: number;
@@ -120,7 +120,7 @@ export class WorldGenerator {
 
   isImmutableBackground(x: number, y: number): boolean {
     return this.version >= 3 && Math.abs(x) <= MAX_TILE_X &&
-      y > this.surfaceAt(x) && y < WORLD_HEIGHT;
+      y >= (this.version >= 6 ? this.surfaceAt(x) : this.surfaceAt(x) + 1) && y < WORLD_HEIGHT;
   }
 
   backgroundAt(x: number, y: number): BlockId {
@@ -128,7 +128,8 @@ export class WorldGenerator {
     if (this.version >= 4 && this.isBackgroundTrunk(x, y)) return this.resources.blockAt(x, y);
     const surface = this.surfaceAt(x);
     if (y < surface) return this.isBackgroundTrunk(x, y) ? Block.PineLog : Block.Air;
-    if (y === surface) return Block.Air;
+    if (y === surface) return this.version >= 6 ? Block.Dirt : Block.Air;
+    if (this.version >= 6) return y <= surface + 4 ? Block.Dirt : Block.Stone;
     const block = this.blockAt(x, y);
     if (block === Block.Water) return Block.Air;
     return block === Block.Air ? this.nearestGeneratedBlock(x, y, surface) : block;

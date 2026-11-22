@@ -21,6 +21,16 @@ function flatSession(): GameSession {
   return session;
 }
 
+describe("mining material names", () => {
+  it("names the block output reported in the mining HUD", () => {
+    const session = GameSession.create("Matériau", "material-label", 1000);
+    session.world.setBlock(10, 40, Block.Dirt, 0, true);
+    session.world.setBlock(11, 40, Block.Stone, 0, true);
+    expect(session.miningMaterialLabel(10, 40, "foreground")).toBe("Terre");
+    expect(session.miningMaterialLabel(11, 40, "foreground")).toBe("Pierre commune");
+  });
+});
+
 function ladderSession(): GameSession {
   const session = flatSession();
   const ground = session.world.generator.surfaceAt(8);

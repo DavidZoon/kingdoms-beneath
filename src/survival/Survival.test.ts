@@ -4,7 +4,7 @@ import { DAY_LENGTH_TICKS } from "../lighting/WorldClock";
 import { MAX_GROUND_DROPS } from "../game/GameSession";
 import { parseSave, serializeSave } from "../save/schema";
 import { RESPAWN_TICKS, PLAYER_MAX_HEALTH } from "./SurvivalState";
-import { TILE_SIZE } from "../world/blocks";
+import { Block, TILE_SIZE, TOOLS } from "../world/blocks";
 import type { ZombieState } from "../entities/Zombie";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
@@ -105,6 +105,47 @@ describe("player survival", () => {
 });
 
 describe("first night and combat", () => {
+  it("attacks only in front and uses the selected weapon, tool or minimal bare damage", () => {
+    const session = GameSession.create("Attaque", "direction", 1000);
+    session.selectHotbar(1);
+    session.player.facing = 1;
+    const front = zombie("front", session.player.x + 24, session.player.y);
+    const behind = zombie("behind", session.player.x - 24, session.player.y);
+    session.zombies.push(front, behind);
+    expect(session.attackForward()).toMatchObject({ ok: true, hit: true, damage: 10 });
+    expect(front.health).toBe(30);
+    expect(behind.health).toBe(40);
+    expect(session.hotbar[1]).toMatchObject({ durability: 299 });
+
+    advance(session, 18);
+    session.player.facing = 1;
+    session.hotbar[0] = { itemId: "stonePickaxe", quantity: 1, durability: 50 };
+    session.selectHotbar(0);
+    expect(session.attackForward()).toMatchObject({ ok: true, damage: 4 });
+    expect(front.health).toBe(26);
+
+    advance(session, 18);
+    session.hotbar[0] = { itemId: "dirt", quantity: 1 };
+    front.x = session.player.x + 12;
+    expect(session.attackForward()).toMatchObject({ ok: true, damage: 1 });
+    expect(front.health).toBe(25);
+  });
+
+  it("gives metal weapons greater damage and progressively longer reach", () => {
+    const session = GameSession.create("Armes", "weapon-range", 1000);
+    expect(session.hotbar[1]).toMatchObject({ itemId: "woodSword", durability: 300 });
+    expect([
+      TOOLS.woodSword.attackDamage,
+      TOOLS.copperSword.attackDamage,
+      TOOLS.ironSword.attackDamage,
+    ]).toEqual([10, 16, 24]);
+    expect([
+      TOOLS.woodSword.attackRange,
+      TOOLS.copperSword.attackRange,
+      TOOLS.ironSword.attackRange,
+    ]).toEqual([26, 30, 36]);
+  });
+
   it("starts one bounded wave per night and does not duplicate it after reload", () => {
     const session = GameSession.create("Nuit", "night", 1000);
     session.setDifficulty("standard");
@@ -150,5 +191,30 @@ describe("first night and combat", () => {
     expect(session.attackZombie(x, y)).toEqual({ ok: true, killed: true });
     expect(session.zombies).toHaveLength(0);
     expect(session.hotbar[0]).toMatchObject({ durability: 48 });
+  });
+
+  it("separates overlapping zombies without using them as steps", () => {
+    const session = GameSession.create("Séparation", "zombie-separation", 1000);
+    session.survival.invulnerabilityTicks = 100;
+    const first = zombie("zombie-a", session.player.x + 28, session.player.y);
+    const second = zombie("zombie-b", session.player.x + 28, session.player.y);
+    session.zombies.push(first, second);
+    const originalY = first.y;
+    session.step(idle);
+    expect(Math.abs(first.x - second.x)).toBeGreaterThanOrEqual(12);
+    expect(first.y).toBeGreaterThanOrEqual(originalY);
+    expect(second.y).toBeGreaterThanOrEqual(originalY);
+  });
+
+  it("lets a zombie step over a one-block foreground obstacle", () => {
+    const session = GameSession.create("Escalade", "zombie-step", 1000);
+    const first = zombie("zombie-step", session.player.x + 36, session.player.y);
+    const supportY = Math.floor((first.y + 26) / TILE_SIZE);
+    const obstacleX = Math.floor((first.x - 2) / TILE_SIZE);
+    session.world.setBlock(obstacleX, supportY - 1, Block.Stone, 0, true);
+    session.zombies.push(first);
+    const startY = first.y;
+    for (let tick = 0; tick < 20; tick++) session.step(idle);
+    expect(first.y).toBeLessThan(startY);
   });
 });

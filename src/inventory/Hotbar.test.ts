@@ -9,7 +9,8 @@ describe("shortcut stacks", () => {
   it("starts with ten independent slots, including empty ones", () => {
     const session = GameSession.create("Test", "hotbar", 1000);
     expect(session.hotbar).toHaveLength(HOTBAR_SLOT_COUNT);
-    expect(session.hotbar.filter((stack) => stack === null)).toHaveLength(6);
+    expect(session.hotbar.filter((stack) => stack === null)).toHaveLength(5);
+    expect(session.hotbar[1]).toEqual({ itemId: "woodSword", quantity: 1, durability: 300 });
     expect(session.selectedItem).toBe("pine_log");
     expect(session.totalItems("pine_log")).toBe(24);
   });

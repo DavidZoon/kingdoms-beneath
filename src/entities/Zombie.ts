@@ -55,6 +55,55 @@ export function zombieOverlapsSolid(world: WorldModel, zombie: Pick<ZombieState,
   return overlapsSolid(world, zombie.x, zombie.y);
 }
 
+export function separateZombies(world: WorldModel, zombies: readonly ZombieState[]): void {
+  const canMoveTo = (zombie: ZombieState, x: number): boolean =>
+    x >= -MAX_TILE_X * TILE_SIZE &&
+    x <= MAX_TILE_X * TILE_SIZE - ZOMBIE_WIDTH &&
+    !overlapsSolid(world, x, zombie.y);
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (let first = 0; first < zombies.length; first++) {
+      for (let second = first + 1; second < zombies.length; second++) {
+        const leftZombie = zombies[first];
+        const rightZombie = zombies[second];
+        const verticalOverlap = Math.min(leftZombie.y + ZOMBIE_HEIGHT, rightZombie.y + ZOMBIE_HEIGHT) -
+          Math.max(leftZombie.y, rightZombie.y);
+        if (verticalOverlap <= 0) continue;
+        const leftCenter = leftZombie.x + ZOMBIE_WIDTH / 2;
+        const rightCenter = rightZombie.x + ZOMBIE_WIDTH / 2;
+        const overlap = ZOMBIE_WIDTH - Math.abs(rightCenter - leftCenter);
+        if (overlap <= 0) continue;
+        const direction = rightCenter === leftCenter
+          ? leftZombie.id < rightZombie.id ? 1 : -1
+          : Math.sign(rightCenter - leftCenter);
+        let leftMoved = 0;
+        let rightMoved = 0;
+        const half = overlap / 2;
+        if (canMoveTo(leftZombie, leftZombie.x - direction * half)) {
+          leftMoved = -direction * half;
+        }
+        if (canMoveTo(rightZombie, rightZombie.x + direction * half)) {
+          rightMoved = direction * half;
+        }
+        if (leftMoved === 0 && rightMoved !== 0) rightMoved = direction * overlap;
+        else if (rightMoved === 0 && leftMoved !== 0) leftMoved = -direction * overlap;
+        if ((rightMoved !== 0 && !canMoveTo(rightZombie, rightZombie.x + rightMoved)) ||
+            (leftMoved !== 0 && !canMoveTo(leftZombie, leftZombie.x + leftMoved))) {
+          continue;
+        }
+        if (leftMoved !== 0 || rightMoved !== 0) {
+          leftZombie.x += leftMoved;
+          leftZombie.vx = 0;
+          rightZombie.x += rightMoved;
+          rightZombie.vx = 0;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+}
+
 export function spawnZombie(world: WorldModel, player: PlayerState, direction: -1 | 1, id: string, offset: number): ZombieState | null {
   const playerTile = Math.floor((player.x + 6) / TILE_SIZE);
   const xTile = playerTile + direction * (18 + offset);

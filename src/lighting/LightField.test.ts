@@ -71,6 +71,14 @@ describe("cellular light and occlusion", () => {
     expect(throughLeaves).toBeLessThan(throughLadder);
   });
 
+  it("blocks torchlight completely through gravel", () => {
+    const world = chamber(32);
+    world.setBlock(30, 60, Block.Torch);
+    world.setBlock(32, 60, Block.Gravel);
+    const field = calculateLightField(world, { minX: 30, maxX: 34, minY: 59, maxY: 61 });
+    expect(sampleLight(field, 33, 60).torch).toBe(0);
+  });
+
   it("keeps illumination from other torches when one source is removed", () => {
     const world = chamber(32);
     const bounds = { minX: 31, maxX: 34, minY: 59, maxY: 61 };
@@ -98,6 +106,9 @@ describe("cellular light and occlusion", () => {
     expect(sampleLight(field, 8, 9).sky).toBe(1);
     expect(lightBrightness(0, 0, 1)).toBeLessThan(lightBrightness(1, 0, 1));
     expect(lightBrightness(0, 1, 0.2)).toBe(1);
+    expect(lightBrightness(0, 0, 0.2, true)).toBe(0);
+    expect(lightBrightness(0, 0.25, 0.2, true)).toBe(0.25);
+    expect(lightBrightness(0, 0, 0.2, false)).toBeGreaterThan(0);
   });
 
   it("diffuses daylight around an isolated obstruction without passing through it", () => {

@@ -64,7 +64,8 @@ export type ProcessedItemId = (typeof PROCESSED_ITEMS)[number];
 export type MaterialItemId = (typeof CONSTRUCTION_ITEMS)[number] | ProcessedItemId | ResourceId;
 export const BLOCK_ITEMS: readonly BlockItemId[] = [...CONSTRUCTION_ITEMS, ...RESOURCE_ITEMS.filter(isResourceBlock)];
 export const MATERIAL_ITEMS: readonly MaterialItemId[] = [...CONSTRUCTION_ITEMS, ...PROCESSED_ITEMS, ...RESOURCE_ITEMS];
-export const TOOL_ITEMS = ["stonePickaxe", "copperPickaxe", "ironPickaxe"] as const;
+export const WEAPON_ITEMS = ["woodSword", "copperSword", "ironSword"] as const;
+export const TOOL_ITEMS = ["stonePickaxe", "copperPickaxe", "ironPickaxe", ...WEAPON_ITEMS] as const;
 export const ITEMS = [...MATERIAL_ITEMS, ...TOOL_ITEMS] as const;
 export type ToolItemId = (typeof TOOL_ITEMS)[number];
 export type ItemId = (typeof ITEMS)[number];
@@ -75,14 +76,28 @@ export interface ToolStack {
   rotation?: never;
 }
 export type Inventory = Record<MaterialItemId, number> & { tools: ToolStack[] };
-export const TOOLS: Record<ToolItemId, { category: "tools"; maxDurability: number; miningPower: number }> = {
-  stonePickaxe: { category: "tools", maxDurability: 500, miningPower: 2 },
-  copperPickaxe: { category: "tools", maxDurability: 800, miningPower: 4 },
-  ironPickaxe: { category: "tools", maxDurability: 1200, miningPower: 7 },
+export type WeaponItemId = (typeof WEAPON_ITEMS)[number];
+export const TOOLS: Record<ToolItemId, {
+  category: "tools" | "weapons";
+  maxDurability: number;
+  miningPower: number;
+  attackDamage: number;
+  attackRange: number;
+  kind: "tool" | "weapon";
+}> = {
+  stonePickaxe: { category: "tools", maxDurability: 500, miningPower: 2, attackDamage: 4, attackRange: 20, kind: "tool" },
+  copperPickaxe: { category: "tools", maxDurability: 800, miningPower: 4, attackDamage: 8, attackRange: 22, kind: "tool" },
+  ironPickaxe: { category: "tools", maxDurability: 1200, miningPower: 7, attackDamage: 14, attackRange: 24, kind: "tool" },
+  woodSword: { category: "weapons", maxDurability: 300, miningPower: 1, attackDamage: 10, attackRange: 26, kind: "weapon" },
+  copperSword: { category: "weapons", maxDurability: 600, miningPower: 1, attackDamage: 16, attackRange: 30, kind: "weapon" },
+  ironSword: { category: "weapons", maxDurability: 1000, miningPower: 1, attackDamage: 24, attackRange: 36, kind: "weapon" },
 };
 
 export function isToolItem(itemId: ItemId): itemId is ToolItemId {
   return TOOL_ITEMS.some((tool) => tool === itemId);
+}
+export function isWeaponItem(itemId: ItemId): itemId is WeaponItemId {
+  return WEAPON_ITEMS.some((weapon) => weapon === itemId);
 }
 export type Rotation = 0 | 90 | 180 | 270;
 export type ConstructionPlane = "foreground" | "background";
@@ -111,6 +126,9 @@ export const ITEM_LABELS: Record<ItemId, string> = {
   stonePickaxe: "Pioche en pierre",
   copperPickaxe: "Pioche en cuivre",
   ironPickaxe: "Pioche en fer",
+  woodSword: "Épée en bois",
+  copperSword: "Épée en cuivre",
+  ironSword: "Épée en fer",
   water: "Eau",
   workbench: "Établi",
   furnace: "Four",
@@ -144,6 +162,9 @@ export const ITEM_PLANES: Record<ItemId, readonly ConstructionPlane[]> = {
   stonePickaxe: [],
   copperPickaxe: [],
   ironPickaxe: [],
+  woodSword: [],
+  copperSword: [],
+  ironSword: [],
   water: ["foreground"],
   workbench: ["foreground"],
   furnace: ["foreground"],

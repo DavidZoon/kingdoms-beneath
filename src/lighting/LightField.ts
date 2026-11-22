@@ -3,7 +3,7 @@ import { BLOCKS, Block, TILE_SIZE, WORLD_HEIGHT, type ItemId } from "../world/bl
 import type { WorldModel } from "../world/WorldModel";
 
 export const TORCH_RADIUS = 10;
-export const CAVE_AMBIENT = 0.12;
+export const SURFACE_AMBIENT = 0.12;
 const SUNLIGHT_RADIUS = 8;
 const LIGHT_EPSILON = 0.000001;
 
@@ -204,6 +204,6 @@ export function sampleLight(field: LightField, x: number, y: number): { sky: num
   return { sky: field.sky[index], torch: field.torch[index] };
 }
 
-export function lightBrightness(sky: number, torch: number, daylight: number): number {
-  return Math.max(CAVE_AMBIENT, sky * daylight, torch);
+export function lightBrightness(sky: number, torch: number, daylight: number, underground = false): number {
+  return Math.max(underground ? 0 : SURFACE_AMBIENT, sky * daylight, torch);
 }

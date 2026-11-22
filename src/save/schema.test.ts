@@ -29,7 +29,10 @@ describe("local save file validation", () => {
   it("migrates v9 saves without changing their resources or generator", () => {
     const save = fixture();
     const { collectedPlants: _plants, ...previous } = save;
-    expect(validateSave({ ...previous, schemaVersion: 9, generatorVersion: 4 })).toEqual({ ...save, generatorVersion: 4 });
+    expect(validateSave({ ...previous, schemaVersion: 9, generatorVersion: 4 })).toEqual({
+      ...save, generatorVersion: 4,
+      hotbar: save.hotbar.map((stack) => stack?.itemId === "woodSword" ? null : stack),
+    });
     expect(() => validateSave({ ...previous, schemaVersion: 9 })).toThrow(/Version/);
   });
 
@@ -71,10 +74,16 @@ describe("local save file validation", () => {
     expect(parseSave(serializeSave(save))).toEqual(save);
   });
 
+  it("requires a persisted facing direction in v13", () => {
+    const save = fixture();
+    const { facing: _facing, ...player } = save.player;
+    expect(() => validateSave({ ...save, player })).toThrow(/joueur/);
+  });
+
   it("migrates v11 with full health and an unstarted night-wave marker", () => {
     const save = fixture();
-    const migrated = validateSave({ ...save, schemaVersion: 11 });
-    expect(migrated.schemaVersion).toBe(12);
+    const migrated = validateSave({ ...save, schemaVersion: 11, generatorVersion: 5 });
+    expect(migrated.schemaVersion).toBe(13);
     expect(migrated.difficulty).toBe("standard");
     expect(migrated.survival).toEqual({
       health: 100,
@@ -115,22 +124,23 @@ describe("local save file validation", () => {
   it("rejects advanced stations, items and recipes in a v10 save", () => {
     const save = fixture();
     expect(() => validateSave({
-      ...save, schemaVersion: 10, hotbar: [{ itemId: "workbench", quantity: 1 }, ...save.hotbar.slice(1)],
+      ...save, schemaVersion: 10, generatorVersion: 5,
+      hotbar: [{ itemId: "workbench", quantity: 1 }, ...save.hotbar.slice(1)],
     })).toThrow(/version/);
     expect(() => validateSave({
-      ...save, schemaVersion: 10,
+      ...save, schemaVersion: 10, generatorVersion: 5,
       edits: [...save.edits, { x: 20, y: 20, block: Block.Forge }],
     })).toThrow(/terrain/);
     expect(() => validateSave({
-      ...save, schemaVersion: 10,
+      ...save, schemaVersion: 10, generatorVersion: 5,
       crafting: { recipeId: "copperIngot", quantity: 1, completed: 0, progressTicks: 0 },
     })).toThrow(/Fabrication/);
   });
 
   it.each([
     ["format", "other-game"],
-    ["schemaVersion", 13],
-    ["generatorVersion", 6],
+    ["schemaVersion", 14],
+    ["generatorVersion", 7],
     ["name", ""],
     ["id", "../not-a-filename"],
     ["tick", -1],
@@ -177,7 +187,7 @@ describe("local save file validation", () => {
     delete legacy.inventory.ladder;
     delete legacy.inventory.torch;
     const migrated = parseSave(JSON.stringify(legacy));
-    expect(migrated.schemaVersion).toBe(12);
+    expect(migrated.schemaVersion).toBe(13);
     expect(migrated.generatorVersion).toBe(1);
     expect(migrated.inventory).toEqual(emptyInventory());
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 12 });
@@ -230,7 +240,7 @@ describe("local save file validation", () => {
     const { torch: _torch, ...inventory } = previous.inventory;
     const migrated = parseSave(JSON.stringify({ ...previous, schemaVersion: 3, inventory }));
     expect(migrated).toMatchObject({
-      schemaVersion: 12, generatorVersion: save.generatorVersion, tick: save.tick,
+      schemaVersion: 13, generatorVersion: save.generatorVersion, tick: save.tick,
       edits: save.edits, blockDamage: save.blockDamage, groundDrops: save.groundDrops,
       creativeMode: true, lightingQuality: "standard", selectedSlot: 2,
     });
@@ -260,7 +270,7 @@ describe("local save file validation", () => {
     old.inventory.dirt = 100;
     old.inventory.wood = 150;
     const migrated = validateSave(old);
-    expect(migrated.schemaVersion).toBe(12);
+    expect(migrated.schemaVersion).toBe(13);
     expect(migrated.selectedSlot).toBe(4);
     expect(migrated.hotbar).toHaveLength(10);
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 99 });
@@ -318,7 +328,10 @@ describe("local save file validation", () => {
     save.crafting = { recipeId: "torch", quantity: 4, completed: 1, progressTicks: 30 };
     save.edits.push({ x: 10, y: 20, block: Block.WoodStairs });
     const migrated = validateSave({ ...save, schemaVersion: 5, generatorVersion: 2 });
-    expect(migrated).toEqual({ ...save, generatorVersion: 2 });
+    expect(migrated).toEqual({
+      ...save, generatorVersion: 2,
+      hotbar: save.hotbar.map((stack) => stack?.itemId === "woodSword" ? null : stack),
+    });
     const session = new GameSession(migrated);
     expect(session.selectedRotation).toBe(0);
     expect(session.world.getRotation(10, 20)).toBe(0);
@@ -348,7 +361,7 @@ describe("local save file validation", () => {
       ...save, schemaVersion: 6, generatorVersion: 2,
       blockDamage: [{ x: 20, y: 20, damage: 3 }],
     });
-    expect(migrated.schemaVersion).toBe(12);
+    expect(migrated.schemaVersion).toBe(13);
     expect(migrated.generatorVersion).toBe(2);
     expect(migrated.hotbar[2]?.rotation).toBe(90);
     expect(migrated.edits[0].rotation).toBe(270);

@@ -34,7 +34,7 @@ input {
 }
 #game-container { position: fixed; inset: 0; width: 100%; height: 100dvh; }
 #game-container canvas { display: block; touch-action: none; image-rendering: pixelated; }
-#app-ui { position: fixed; inset: 0; pointer-events: none; }
+#app-ui { position: fixed; z-index: 2; inset: 0; pointer-events: none; }
 .menu-screen, .modal-screen, .error-panel, .confirm-dialog { pointer-events: auto; }
 .menu-screen {
   position: absolute; inset: 0; overflow-y: auto;
@@ -189,7 +189,7 @@ h3 { font: 400 23px Georgia, serif; }
   color: #fffce6; background: #142a21ed; border-radius: 6px; max-width: 650px;
   max-height: 35dvh; overflow-y: auto; pointer-events: auto;
 }
-.bottom-hud { position: absolute; z-index: 1; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); }
+.bottom-hud { position: absolute; z-index: 1; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); pointer-events: auto; }
 .action-message { font-size: 12px; text-shadow: 0 1px 3px #000; text-align: center; margin: 0 10px 10px; color: #fff3cc; }
 .hotbar { display: grid; grid-template-columns: repeat(10, var(--hotbar-slot)); gap: 4px; width: fit-content; max-width: calc(100% - 16px); margin-inline: auto; }
 .hotbar-slot { position: relative; min-width: 0; display: grid; }
@@ -216,14 +216,19 @@ h3 { font: 400 23px Georgia, serif; }
 .item-icon { position: relative; display: inline-grid; width: 20px; height: 20px; grid-row: span 2; }
 .item-icon .block-swatch { display: block; width: 100%; height: 100%; grid-row: auto; }
 .stonePickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
-.copperPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: sepia(1) saturate(1.8) hue-rotate(330deg) brightness(.92); }
-.ironPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: grayscale(1) contrast(1.15) brightness(1.12); }
+.copperPickaxe { background: url("/assets/copper-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.ironPickaxe { background: url("/assets/iron-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.woodSword { background: url("/assets/wood-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.copperSword { background: url("/assets/copper-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.ironSword { background: url("/assets/iron-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
 .item-durability { position: absolute; left: 0; bottom: 0; width: 100%; height: 4px; appearance: none; border: 0; background: #472e24; }
 .item-durability::-webkit-progress-bar { background: #472e24; }
 .item-durability::-webkit-progress-value { background: #9ac85e; }
 .item-durability::-moz-progress-bar { background: #9ac85e; }
-.touch-controls { display: flex; justify-content: space-between; margin: 12px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
+.touch-controls { display: flex; justify-content: space-between; margin: 12px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); pointer-events: none; }
 .movement-pad, .action-pad { zoom: var(--touch-control-scale); }
+.action-pad { zoom: 1; }
+.movement-pad, .action-pad { pointer-events: auto; }
 .movement-pad {
   display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px);
   gap: 3px;
@@ -233,7 +238,8 @@ h3 { font: 400 23px Georgia, serif; }
 .movement-pad [data-hold="right"] { grid-column: 3; grid-row: 2; }
 .movement-pad [data-hold="down"] { grid-column: 2; grid-row: 3; }
 .action-pad { display: flex; gap: 7px; align-self: end; }
-.touch-controls button { min-width: 48px; min-height: 48px; padding: 8px 12px; background: #17362bd9; border-color: #d9e3b866; font-weight: 600; }
+.action-pad .attack-button { color: #fff0cf; border-color: #d49a6a; background: #62362bd9; }
+.touch-controls button { min-width: 48px; min-height: 48px; padding: 8px 12px; background: #17362bd9; border-color: #d9e3b866; font-weight: 600; pointer-events: auto; }
 .modal-screen { position: absolute; z-index: 20; inset: 0; background: #081b16bd; display: grid; place-items: center; padding: 20px; overflow-y: auto; }
 .pause-card { width: min(430px, 100%); }
 .pause-card p { color: #b7c6ad; font-size: 14px; line-height: 1.6; }

@@ -5,7 +5,7 @@ import { BlockInteraction, blockActionFor } from "../input/BlockInteraction";
 import { MiningHold } from "../game/MiningHold";
 import { isToolStack } from "../inventory/Inventory";
 import {
-  CAVE_AMBIENT, calculateLightField, carriedTorchSource, lightBrightness, withLightSources, type LightField,
+  calculateLightField, carriedTorchSource, lightBrightness, withLightSources, type LightField,
 } from "../lighting/LightField";
 import { daylightAt, dayPhaseAt, type DayPhase } from "../lighting/WorldClock";
 import { getCrackSegments } from "../rendering/blockCracks";
@@ -17,7 +17,7 @@ import {
 } from "../rendering/parallax";
 import { PLAYER_HEIGHT, PLAYER_WIDTH } from "../player/PlayerController";
 import {
-  Block, BLOCKS, MATERIAL_ITEMS, CHUNK_SIZE, ITEM_LABELS, TILE_ART_SIZE, TILE_SIZE, TOOLS, WORLD_HEIGHT,
+  Block, BLOCKS, MATERIAL_ITEMS, TOOL_ITEMS, CHUNK_SIZE, ITEM_LABELS, TILE_ART_SIZE, TILE_SIZE, TOOLS, WORLD_HEIGHT,
   type BlockId, type ConstructionPlane,
 } from "../world/blocks";
 import { cellKey, chunkOf } from "../world/WorldModel";
@@ -33,6 +33,7 @@ export interface WorldCallbacks {
 export class WorldScene extends Phaser.Scene {
   paused = false;
   private actor!: Phaser.GameObjects.Image;
+  private heldItem!: Phaser.GameObjects.Image;
   private selection!: Phaser.GameObjects.Graphics;
   private backdrop!: Phaser.GameObjects.Graphics;
   private foreground!: Phaser.GameObjects.Graphics;
@@ -59,6 +60,7 @@ export class WorldScene extends Phaser.Scene {
   private lightRevision = -1;
   private lightRenderKey = "";
   private lastDayPhase: DayPhase = "Jour";
+  private attackSwingMs = 0;
 
   constructor(
     private readonly session: GameSession,
@@ -69,7 +71,17 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.image("drop-stonePickaxe", new URL("assets/stone-pickaxe.png", document.baseURI).href);
+    const files: Record<string, string> = {
+      stonePickaxe: "stone-pickaxe.png",
+      copperPickaxe: "copper-pickaxe.png",
+      ironPickaxe: "iron-pickaxe.png",
+      woodSword: "wood-sword.png",
+      copperSword: "copper-sword.png",
+      ironSword: "iron-sword.png",
+    };
+    for (const [item, file] of Object.entries(files)) {
+      this.load.image(`drop-${item}`, new URL(`assets/${file}`, document.baseURI).href);
+    }
   }
 
   create(): void {
@@ -86,6 +98,7 @@ export class WorldScene extends Phaser.Scene {
     this.createTileAtlas();
     this.createDropTextures();
     this.createActor();
+    this.heldItem = this.add.image(0, 0, "drop-woodSword").setOrigin(0.5, 0.8).setDepth(4.1);
     this.target = {
       x: Math.floor(this.session.player.x / TILE_SIZE) + 2,
       y: Math.floor((this.session.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE),
@@ -102,7 +115,13 @@ export class WorldScene extends Phaser.Scene {
       this.target = { x: Math.floor(worldPoint.x / TILE_SIZE), y: Math.floor(worldPoint.y / TILE_SIZE) };
     };
     const press = (event: PointerEvent): void => {
-      if (this.paused || this.session.survival.dead || !this.controls.canInteract || event.button !== 0) return;
+      if (this.paused || this.session.survival.dead || !this.controls.canInteract) return;
+      if (event.button === 2) {
+        event.preventDefault();
+        this.controls.queueAttack();
+        return;
+      }
+      if (event.button !== 0) return;
       point(event);
       this.miningHold.reset();
       this.actionCooldown = 0;
@@ -191,18 +210,25 @@ export class WorldScene extends Phaser.Scene {
     this.handlePinch();
     this.actionCooldown -= elapsed;
     if (!this.controls.canInteract) this.blockInteraction.reset();
+    if (this.controls.consumeAttack()) {
+      const result = this.session.attackForward();
+      if (result.ok) this.attackSwingMs = 140;
+      this.callbacks.onAction(!result.ok ? result.reason :
+        !result.hit ? "Coup dans le vide." :
+        result.toolBroken ? "L'arme ou l'outil s'est cassé." :
+        result.killed ? `Coup fatal : ${result.damage} dégâts.` :
+          `Attaque : ${result.damage} dégâts.`);
+      this.callbacks.onHud();
+    }
     const selection = this.selectionKey();
     const action = !this.session.survival.dead && this.controls.canInteract && this.pinchDistance === 0
       ? this.blockInteraction.heldAction(selection) : null;
     const tapPlacement = this.blockInteraction.consumePlacement(selection);
     const { x, y } = this.target;
     const plantCell = this.session.getPlantTarget(x, y);
-    const combatTarget = action === "mine" ? this.session.getZombieTarget(x, y) : null;
     const miningCell = blockActionFor(this.session.selectedItem) === "mine"
       ? this.session.getMiningTarget(x, y) : null;
-    const miningTarget = combatTarget
-      ? `${combatTarget.id}:${combatTarget.health}:${selection}`
-      : action === "harvest"
+    const miningTarget = action === "harvest"
       ? plantCell ? `${cellKey(x, y)}:${selection}:${plantCell.id}` : null
       : action === "mine"
       ? `${cellKey(x, y)}:${selection}:${miningCell
@@ -211,15 +237,6 @@ export class WorldScene extends Phaser.Scene {
       : null;
     const miningTicks = this.miningHold.advance(delta, miningTarget);
     for (let tick = 0; tick < miningTicks; tick++) {
-      if (combatTarget) {
-        const result = this.session.attackZombie(x, y);
-        this.callbacks.onAction(!result.ok ? result.reason :
-          result.toolBroken ? "L'outil s'est cassé pendant le combat." :
-          result.killed ? "Zombie vaincu." : "Coup porté au zombie.");
-        this.callbacks.onHud();
-        if (result.ok && (result.killed || result.toolBroken)) this.miningHold.reset();
-        break;
-      }
       if (action === "harvest" && plantCell) {
         const result = this.session.harvestPlant(x, y);
         this.callbacks.onAction(result.ok ? `Cueillette : ${ITEM_LABELS[plantCell.itemId]}.` : result.reason);
@@ -235,9 +252,11 @@ export class WorldScene extends Phaser.Scene {
       const result = this.session.mine(x, y);
       if (result.ok) {
         const { x: minedX, y: minedY, plane } = miningCell;
-        const durability = BLOCKS[this.session.world.getBlockOnPlane(minedX, minedY, plane)].durability ?? 0;
+        const material = this.session.world.getBlockOnPlane(minedX, minedY, plane);
+        const durability = BLOCKS[material].durability ?? 0;
+        const materialLabel = this.session.miningMaterialLabel(minedX, minedY, plane);
         this.callbacks.onAction(result.toolBroken ? "L'outil s'est cassé." : result.destroyed ? "Bloc récolté." :
-          `Minage en cours · durabilité ${durability - this.session.getBlockDamage(minedX, minedY, plane)} / ${durability}`);
+          `Minage de ${materialLabel} en cours · durabilité ${durability - this.session.getBlockDamage(minedX, minedY, plane)} / ${durability}`);
         if (result.destroyed) {
           this.redrawChunk(chunkOf(minedX), chunkOf(minedY));
           this.miningHold.reset();
@@ -264,14 +283,13 @@ export class WorldScene extends Phaser.Scene {
     }
     const { player } = this.session;
     this.actor.setPosition(player.x, player.y);
-    if (player.vx !== 0) this.actor.setFlipX(player.vx < 0);
+    this.actor.setFlipX((player.facing ?? 1) < 0);
     this.actor.setAlpha(this.session.survival.dead ? 0.3 :
       this.session.survival.invulnerabilityTicks > 0 && Math.floor(this.session.tick / 4) % 2 === 0 ? 0.45 : 1);
     this.drawZombies();
+    this.updateHeldItem(elapsed);
     this.updateCameraAndChunks();
-    const selectionTarget = combatTarget
-      ? { x: Math.floor(combatTarget.x / TILE_SIZE), y: Math.floor(combatTarget.y / TILE_SIZE) }
-      : plantCell ?? miningCell ?? this.target;
+    const selectionTarget = plantCell ?? miningCell ?? this.target;
     this.selection.clear().lineStyle(1, this.session.withinReach(this.target.x, this.target.y) ? 0xf6e5ad : 0xc76852);
     this.selection.strokeRect(selectionTarget.x * TILE_SIZE, selectionTarget.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     const phase = dayPhaseAt(this.session.tick);
@@ -307,6 +325,27 @@ export class WorldScene extends Phaser.Scene {
       this.zombies.fillStyle(0xa5cb63);
       this.zombies.fillRect(zombie.x - 2, zombie.y - 5, 16 * zombie.health / ZOMBIE_MAX_HEALTH, 3);
     }
+  }
+
+  private updateHeldItem(delta: number): void {
+    this.attackSwingMs = Math.max(0, this.attackSwingMs - delta);
+    const selected = this.session.selectedItem;
+    this.heldItem.setVisible(selected !== null && !this.session.survival.dead);
+    if (!selected) return;
+    const texture = `drop-${selected}`;
+    if (this.heldItem.texture.key !== texture) this.heldItem.setTexture(texture);
+    const facing = this.session.player.facing ?? 1;
+    const progress = this.attackSwingMs > 0 ? 1 - this.attackSwingMs / 140 : 0;
+    const swing = this.attackSwingMs > 0 ? (-55 + progress * 110) * facing : -12 * facing;
+    this.heldItem
+      .setPosition(
+        this.session.player.x + (facing > 0 ? PLAYER_WIDTH + 2 : -2),
+        this.session.player.y + 14,
+      )
+      .setDisplaySize(18, 18)
+      .setFlipX(facing < 0)
+      .setAngle(swing)
+      .setAlpha(this.session.survival.invulnerabilityTicks > 0 ? 0.65 : 1);
   }
 
   private handlePinch(): void {
@@ -364,7 +403,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private createDropTextures(): void {
-    if (!this.textures.exists("drop-stonePickaxe")) throw new Error("Impossible de charger l'icône de la pioche.");
+    for (const item of TOOL_ITEMS) {
+      if (!this.textures.exists(`drop-${item}`)) throw new Error(`Impossible de charger l'icône de ${ITEM_LABELS[item]}.`);
+    }
     for (const item of MATERIAL_ITEMS) {
       const texture = this.textures.createCanvas(`drop-${item}`, TILE_ART_SIZE, TILE_ART_SIZE);
       if (!texture) throw new Error(`Impossible de créer l'icône de ${ITEM_LABELS[item]}.`);
@@ -574,7 +615,7 @@ export class WorldScene extends Phaser.Scene {
     this.lighting.clear();
     const daylight = daylightStep / levels;
     if (bottomCell >= WORLD_HEIGHT) {
-      this.lighting.fillStyle(0x09131f, 1 - CAVE_AMBIENT).fillRect(
+      this.lighting.fillStyle(0x09131f, 1).fillRect(
         minX * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE, (maxX - minX + 1) * TILE_SIZE,
         (bottomCell - WORLD_HEIGHT + 1) * TILE_SIZE,
       );
@@ -586,12 +627,14 @@ export class WorldScene extends Phaser.Scene {
       this.lightRevision = revision;
     }
     const field = carried ? withLightSources(this.session.world, this.lightField, [carried]) : this.lightField;
-    const drawRuns = (y: number, valueAt: (index: number) => number, color: number, alphaScale: number): void => {
+    const drawRuns = (
+      y: number, valueAt: (index: number, x: number) => number, color: number, alphaScale: number,
+    ): void => {
       let runStart = minX;
       let previous = -1;
       for (let x = minX; x <= maxX + 1; x++) {
         const index = (y - field.minY) * field.width + x - field.minX;
-        const value = x <= maxX ? valueAt(index) : -1;
+        const value = x <= maxX ? valueAt(index, x) : -1;
         if (value === previous) continue;
         if (previous > 0) {
           this.lighting.fillStyle(color, previous * alphaScale).fillRect(
@@ -603,8 +646,10 @@ export class WorldScene extends Phaser.Scene {
       }
     };
     for (let y = minY; y <= maxY; y++) {
-      drawRuns(y, (index) => Math.round(
-        (1 - lightBrightness(field.sky[index], field.torch[index], daylight)) * levels,
+      drawRuns(y, (index, x) => Math.round(
+        (1 - lightBrightness(
+          field.sky[index], field.torch[index], daylight, y > this.session.world.generator.surfaceAt(x),
+        )) * levels,
       ), 0x09131f, 1 / levels);
     }
     if (quality === "standard") {

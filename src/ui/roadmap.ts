@@ -29,7 +29,7 @@ const milestones = [
     title: "Première nuit jouable",
     status: "current",
     label: "En cours · équilibrage",
-    description: "Santé, combat, zombies, hordes plafonnées, quatre difficultés dont un Mode créatif sans ennemis, perte récupérable à la mort et respawn protégé.",
+    description: "Santé, combat directionnel, épées et outils, zombies, hordes plafonnées, quatre difficultés dont un Mode créatif sans ennemis, perte récupérable à la mort et respawn protégé.",
   },
   {
     title: "MVP complet",

@@ -270,6 +270,32 @@ describe("crafting stations and metal progression", () => {
     },
   );
 
+  it("crafts wood, copper and iron swords with station and metal requirements", () => {
+    const session = GameSession.create("Armes", "sword-craft", 1000);
+    putStation(session, Block.Workbench);
+    session.inventory.pine_log = 2;
+    expect(session.startCraft("woodSword", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.woodSword.ticksPerItem);
+    expect(session.inventory.tools).toContainEqual({
+      itemId: "woodSword", quantity: 1, durability: 300,
+    });
+
+    session.inventory.pine_log = 2;
+    session.inventory.copper_ingot = 2;
+    session.inventory.iron_ingot = 3;
+    expect(session.startCraft("copperSword", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.copperSword.ticksPerItem);
+    expect(session.inventory.tools).toContainEqual({
+      itemId: "copperSword", quantity: 1, durability: 600,
+    });
+    putStation(session, Block.Forge);
+    expect(session.startCraft("ironSword", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.ironSword.ticksPerItem);
+    expect(session.inventory.tools).toContainEqual({
+      itemId: "ironSword", quantity: 1, durability: 1000,
+    });
+  });
+
   function putStation(session: GameSession, block: BlockId): void {
     const offset = block === Block.Workbench ? 1 : block === Block.Furnace ? 2 : 3;
     const x = Math.floor((session.player.x + 8) / TILE_SIZE) + offset;

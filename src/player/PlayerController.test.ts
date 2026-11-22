@@ -13,7 +13,7 @@ function swimmingWorld() {
     for (let y = 10; y <= 20; y++) world.setBlock(x, y, Block.Water);
   }
   const player: PlayerState = {
-    x: 9 * TILE_SIZE, y: 14 * TILE_SIZE, vx: 0, vy: 300, grounded: false, climbing: false,
+    x: 9 * TILE_SIZE, y: 14 * TILE_SIZE, vx: 0, vy: 300, grounded: false, climbing: false, facing: 1,
   };
   return { world, player };
 }

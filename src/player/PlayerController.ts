@@ -24,6 +24,7 @@ export interface PlayerState {
   vy: number;
   grounded: boolean;
   climbing: boolean;
+  facing?: -1 | 1;
 }
 
 export interface MovementInput {
@@ -137,6 +138,8 @@ export function stepPlayer(world: WorldModel, player: PlayerState, input: Moveme
   const jumpingInLiquid = swimming && (input.jump || player.vy < -SWIM_SPEED);
   const wasOnStair = wasGrounded && supportBelow(world, player, 0).some((rect) => rect.stair);
   player.vx = (Number(input.right) - Number(input.left)) * (input.run ? 135 : 85);
+  if (player.vx < 0) player.facing = -1;
+  else if (player.vx > 0) player.facing = 1;
   if (input.jump && (swimming || player.grounded)) player.vy = -JUMP_SPEED;
   const verticalInput = input.up || input.down;
   player.climbing = !swimming && !input.jump && (player.climbing || verticalInput) &&

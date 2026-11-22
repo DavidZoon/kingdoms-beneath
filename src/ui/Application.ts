@@ -4,7 +4,7 @@ import { InputController } from "../input/InputController";
 import { SaveRepository } from "../save/SaveRepository";
 import { MAX_SAVE_BYTES, SaveValidationError, parseSave, serializeSave } from "../save/schema";
 import type { SaveGame } from "../save/types";
-import { ITEMS, TOOL_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId, isToolItem, type ItemId } from "../world/blocks";
+import { ITEMS, TOOL_ITEMS, WEAPON_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId, isToolItem, type ItemId } from "../world/blocks";
 import {
   getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
@@ -43,7 +43,7 @@ function slotContent(stack: ItemStack): string {
 
 function stackDescription(stack: ItemStack): string {
   return isToolStack(stack)
-    ? `${ITEM_LABELS[stack.itemId]}, outil, durabilité ${stack.durability} / ${TOOLS[stack.itemId].maxDurability}`
+    ? `${ITEM_LABELS[stack.itemId]}, ${TOOLS[stack.itemId].kind === "weapon" ? "arme" : "outil"}, durabilité ${stack.durability} / ${TOOLS[stack.itemId].maxDurability}`
     : `${ITEM_LABELS[stack.itemId]}, ${stack.quantity}, rotation ${stack.rotation ?? 0}°`;
 }
 
@@ -181,9 +181,9 @@ export class Application {
           </div>
         </header>
         <p id="play-help" class="play-help" data-camera-edge="top" hidden>A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle / nage · Maj : course · Maintenir une plante : cueillir ·
-          Raccourci vide ou outil : maintenir le clic sur un zombie ou un bloc pour attaquer/miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
+          Raccourci vide ou outil : maintenir le clic sur un bloc pour miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
           Carrés superposés : choisir le plan · 1–0 : sélection · I : inventaire · G : déposer · Échap : pause<br>
-          Tactile : maintenez une case pour miner, touchez-la pour poser. Pincez pour zoomer.</p>
+          Tactile : maintenez une case pour miner, touchez-la pour poser. Clic droit ou bouton Attaquer : frappe dans la direction du personnage. Pincez pour zoomer.</p>
         <section id="inventory-panel" class="inventory-panel" hidden aria-labelledby="inventory-title">
           <div class="inventory-heading">
             <div><p class="eyebrow">Ressources transportées</p><h2 id="inventory-title">Inventaire</h2></div>
@@ -203,8 +203,16 @@ export class Application {
               <p class="craft-stations">Les stations se fabriquent puis se posent. Restez à moins de quatre blocs de la station requise pour lancer sa recette.</p>
               <label for="recipe-list">Recette</label>
               <select id="recipe-list" size="${RECIPE_IDS.length + 2}">
-                ${[false, true].map((tools) => `<optgroup label="${tools ? "Outils" : "Construction"}">
-                  ${RECIPE_IDS.filter((id) => TOOL_ITEMS.some((tool) => tool === RECIPES[id].output) === tools).map((id) => {
+                ${[
+                  { label: "Construction et matières", matches: (id: RecipeId) =>
+                    !TOOL_ITEMS.some((tool) => tool === RECIPES[id].output) },
+                  { label: "Armes", matches: (id: RecipeId) =>
+                    WEAPON_ITEMS.some((weapon) => weapon === RECIPES[id].output) },
+                  { label: "Outils", matches: (id: RecipeId) =>
+                    TOOL_ITEMS.some((tool) => tool === RECIPES[id].output) &&
+                    !WEAPON_ITEMS.some((weapon) => weapon === RECIPES[id].output) },
+                ].map((group) => `<optgroup label="${group.label}">
+                  ${RECIPE_IDS.filter(group.matches).map((id) => {
                     const recipe = RECIPES[id];
                     return `<option value="${id}"${id === "torch" ? " selected" : ""}>${ITEM_LABELS[recipe.output]} × ${recipe.outputPerRecipe}</option>`;
                   }).join("")}</optgroup>`).join("")}
@@ -230,7 +238,7 @@ export class Application {
           </div>
           <p>Ajouter des ressources à l'inventaire, dans la limite des emplacements disponibles.</p>
           <form id="dev-resources" class="dev-form">
-            <p id="dev-gallery-label">Ressources et outils</p>
+            <p id="dev-gallery-label">Ressources, outils et armes</p>
             <div id="dev-gallery" class="inventory-slots dev-gallery" role="group" aria-labelledby="dev-gallery-label">
               ${ITEMS.map((item) => `<button type="button" class="inventory-slot" data-dev-resource="${item}"
                 aria-label="${ITEM_LABELS[item]}" title="${ITEM_LABELS[item]}" aria-pressed="${item === this.devResource}">
@@ -262,6 +270,7 @@ export class Application {
             <div class="action-pad">
               <button data-hold="run">Courrir</button>
               <button data-hold="jump">Sauter</button>
+              <button data-hold="attack" class="attack-button">Attaquer</button>
             </div>
           </div>
         </div>
@@ -606,7 +615,7 @@ export class Application {
     for (const button of this.root.querySelectorAll<HTMLButtonElement>("[data-hold]")) {
       const action = button.dataset.hold;
       if (action === "left" || action === "right" || action === "jump" ||
-          action === "up" || action === "down" ||
+          action === "up" || action === "down" || action === "attack" ||
           action === "run") {
         this.controls.bindButton(button, action);
       }
@@ -1251,8 +1260,9 @@ export class Application {
     const nextPlane = plane === "foreground" ? "background" : "foreground";
     const destination = nextPlane === "foreground" ? "au premier plan" : "à l'arrière-plan";
     const canSwitch = !mining && item !== null && canUseItemOnPlane(item, nextPlane);
+    const equipmentAction = tool && TOOLS[tool.itemId].kind === "weapon" ? "Attaquer · Miner" : "Miner";
     const description = tool
-      ? `${ITEM_LABELS[tool.itemId]} · Miner · Plan automatique · ${tool.durability} / ${TOOLS[tool.itemId].maxDurability}`
+      ? `${ITEM_LABELS[tool.itemId]} · ${equipmentAction} · Plan automatique · ${tool.durability} / ${TOOLS[tool.itemId].maxDurability}`
       : item
       ? mining ? `${ITEM_LABELS[item]} · Miner à mains nues · Plan automatique`
         : `${ITEM_LABELS[item]} · Poser · ${planeLabel} · ${rotation}°`

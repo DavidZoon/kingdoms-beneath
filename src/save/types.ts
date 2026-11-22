@@ -11,7 +11,7 @@ import type { NightWaveState, ZombieState } from "../entities/Zombie";
 
 export interface SaveGame {
   format: "kingdoms-beneath";
-  schemaVersion: 12;
+  schemaVersion: 13;
   generatorVersion: GeneratorVersion;
   id: string;
   name: string;

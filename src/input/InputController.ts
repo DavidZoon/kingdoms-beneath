@@ -8,6 +8,7 @@ export class InputController {
   private readonly keys = new Set<string>();
   private readonly held = new Map<string, Set<number>>();
   private jumpQueued = false;
+  private attackQueued = false;
   private inventoryOpen = false;
 
   constructor(
@@ -61,15 +62,18 @@ export class InputController {
     this.keys.clear();
     this.held.clear();
     this.jumpQueued = false;
+    this.attackQueued = false;
   }
 
-  bindButton(button: HTMLButtonElement, action: HoldAction | "jump"): void {
+  bindButton(button: HTMLButtonElement, action: HoldAction | "jump" | "attack"): void {
     button.addEventListener("pointerdown", (event) => {
       if (!this.canInteract) return;
       event.preventDefault();
       button.setPointerCapture(event.pointerId);
       if (action === "jump") {
         this.jumpQueued = true;
+      } else if (action === "attack") {
+        this.attackQueued = true;
       } else {
         const pointers = this.held.get(action) ?? new Set<number>();
         pointers.add(event.pointerId);
@@ -90,6 +94,16 @@ export class InputController {
 
   get canInteract(): boolean {
     return this.mode === "playing" && !this.inventoryOpen;
+  }
+
+  queueAttack(): void {
+    if (this.canInteract) this.attackQueued = true;
+  }
+
+  consumeAttack(): boolean {
+    if (!this.canInteract || !this.attackQueued) return false;
+    this.attackQueued = false;
+    return true;
   }
 
   consumeMovement(): MovementInput {
