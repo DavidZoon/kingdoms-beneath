@@ -51,7 +51,7 @@ describe("progressive crafting", () => {
     expect(session.selectedItem).toBeNull();
     expect(session.startCraft("ladder", 1).ok).toBe(false);
     advance(session, 240);
-    expect(session.inventory.torch).toBe(4);
+    expect(session.totalItems("torch")).toBe(4);
   });
 
   it("crafts from shortcuts alone and tops up an existing output shortcut", () => {
@@ -81,7 +81,8 @@ describe("progressive crafting", () => {
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     advance(restored, 3 * RECIPES.torch.ticksPerItem - 30);
     expect(restored.hotbar[4]).toEqual({ itemId: "torch", quantity: 99, rotation: 90 });
-    expect(restored.inventory.torch).toBe(2);
+    expect(restored.totalItems("torch")).toBe(101);
+    expect(restored.inventory.torch).toBe(0);
     expect(restored.crafting).toBeNull();
   });
 
@@ -103,8 +104,11 @@ describe("progressive crafting", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.inventory.dirt = 99 * 24;
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "pine_log", quantity: 2 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 3 };
     session.hotbar[4] = { itemId: "torch", quantity: 98 };
+    for (let index = 0; index < session.hotbar.length; index++) {
+      if (session.hotbar[index] === null) session.hotbar[index] = { itemId: "stone", quantity: 99 };
+    }
     const before = session.snapshot(2000);
     expect(session.startCraft("torch", 4)).toMatchObject({ ok: false });
     expect(session.snapshot(2000)).toEqual(before);
@@ -113,8 +117,11 @@ describe("progressive crafting", () => {
   it("waits only when both storages are full and resumes into a shortcut after reloading", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.hotbar[2] = { itemId: "pine_log", quantity: 2 };
+    session.hotbar[2] = { itemId: "pine_log", quantity: 3 };
     session.hotbar[4] = { itemId: "torch", quantity: 97 };
+    for (let index = 0; index < session.hotbar.length; index++) {
+      if (session.hotbar[index] === null) session.hotbar[index] = { itemId: "stone", quantity: 99 };
+    }
     expect(session.startCraft("torch", 4)).toEqual({ ok: true });
     session.inventory.dirt = 99 * 24;
     advance(session, 3 * RECIPES.torch.ticksPerItem);
@@ -144,6 +151,9 @@ describe("progressive crafting", () => {
     expect(session.startCraft("ladder", 1).ok).toBe(false);
     session.inventory.dirt = 99 * 23;
     session.inventory.pine_log = 2;
+    for (let index = 0; index < session.hotbar.length; index++) {
+      session.hotbar[index] = { itemId: "stone", quantity: 99 };
+    }
     const before = session.snapshot(2000);
     expect(session.startCraft("torch", 2).ok).toBe(false);
     expect(session.snapshot(2000)).toEqual(before);
@@ -156,7 +166,7 @@ describe("progressive crafting", () => {
     expect(session.startCraft("torch", 100)).toEqual({ ok: true });
     advance(session, 100 * RECIPES.torch.ticksPerItem);
     expect(session.inventory.pine_log).toBe(0);
-    expect(session.inventory.torch).toBe(100);
+    expect(session.totalItems("torch")).toBe(100);
     expect(session.crafting).toBeNull();
   });
 
@@ -166,10 +176,10 @@ describe("progressive crafting", () => {
     session.inventory.pine_log = 2;
     expect(session.startCraft("torch", 4)).toEqual({ ok: true });
     advance(session, RECIPES.torch.ticksPerItem);
-    expect(session.inventory.torch).toBe(1);
+    expect(session.totalItems("torch")).toBe(1);
     expect(session.cancelCraft()).toEqual({ ok: true });
     expect(session.inventory.pine_log).toBe(1);
-    expect(session.inventory.torch).toBe(1);
+    expect(session.totalItems("torch")).toBe(1);
     expect(session.crafting).toBeNull();
   });
 
@@ -179,6 +189,9 @@ describe("progressive crafting", () => {
     session.inventory.pine_log = 1;
     expect(session.startCraft("torch", 2)).toEqual({ ok: true });
     session.inventory.dirt = 99 * 24;
+    for (let index = 0; index < session.hotbar.length; index++) {
+      session.hotbar[index] = { itemId: "stone", quantity: 99 };
+    }
     const before = session.snapshot(2000);
     expect(session.cancelCraft()).toMatchObject({ ok: false });
     expect(session.snapshot(2000)).toEqual(before);
@@ -190,22 +203,25 @@ describe("progressive crafting", () => {
     session.inventory.pine_log = 1;
     expect(session.startCraft("torch", 2).ok).toBe(true);
     advance(session, 90);
-    expect(session.inventory.torch).toBe(1);
+    expect(session.totalItems("torch")).toBe(1);
     expect(session.crafting).toMatchObject({ completed: 1, progressTicks: 30 });
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     expect(restored.inventory.pine_log).toBe(0);
-    expect(restored.inventory.torch).toBe(1);
+    expect(restored.totalItems("torch")).toBe(1);
     advance(restored, 29);
-    expect(restored.inventory.torch).toBe(1);
+    expect(restored.totalItems("torch")).toBe(1);
     advance(restored, 1);
-    expect(restored.inventory.torch).toBe(2);
+    expect(restored.totalItems("torch")).toBe(2);
     expect(restored.crafting).toBeNull();
   });
 
   it("waits visibly when space fills during a batch, and resumes after saving and freeing space", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
-    session.hotbar[0] = { itemId: "pine_log", quantity: 1 };
+    session.hotbar[0] = { itemId: "pine_log", quantity: 2 };
+    for (let index = 1; index < session.hotbar.length; index++) {
+      session.hotbar[index] = { itemId: "stone", quantity: 99 };
+    }
     expect(session.startCraft("torch", 2).ok).toBe(true);
     session.inventory.dirt = 99 * 24;
     advance(session, RECIPES.torch.ticksPerItem);
@@ -218,9 +234,9 @@ describe("progressive crafting", () => {
     restored.inventory.dirt -= 99;
     advance(restored, 1);
     expect(restored.craftingBlocked).toBe(false);
-    expect(restored.inventory.torch).toBe(1);
+    expect(restored.totalItems("torch")).toBe(1);
     advance(restored, RECIPES.torch.ticksPerItem);
-    expect(restored.inventory.torch).toBe(2);
+    expect(restored.totalItems("torch")).toBe(2);
     expect(restored.crafting).toBeNull();
   });
 
@@ -276,24 +292,27 @@ describe("crafting stations and metal progression", () => {
     session.inventory.pine_log = 2;
     expect(session.startCraft("woodSword", 1)).toEqual({ ok: true });
     advance(session, RECIPES.woodSword.ticksPerItem);
-    expect(session.inventory.tools).toContainEqual({
-      itemId: "woodSword", quantity: 1, durability: 300,
-    });
+    expect(session.totalItems("woodSword")).toBe(2);
 
     session.inventory.pine_log = 2;
     session.inventory.copper_ingot = 2;
     session.inventory.iron_ingot = 3;
     expect(session.startCraft("copperSword", 1)).toEqual({ ok: true });
     advance(session, RECIPES.copperSword.ticksPerItem);
-    expect(session.inventory.tools).toContainEqual({
-      itemId: "copperSword", quantity: 1, durability: 600,
-    });
+    expect(session.totalItems("copperSword")).toBe(1);
     putStation(session, Block.Forge);
     expect(session.startCraft("ironSword", 1)).toEqual({ ok: true });
     advance(session, RECIPES.ironSword.ticksPerItem);
-    expect(session.inventory.tools).toContainEqual({
-      itemId: "ironSword", quantity: 1, durability: 1000,
-    });
+    expect(session.totalItems("ironSword")).toBe(1);
+  });
+
+  it("crafts a wood pickaxe at the workbench", () => {
+    const session = GameSession.create("Pioche bois", "wood-pickaxe", 1000);
+    putStation(session, Block.Workbench);
+    session.inventory.pine_log = 3;
+    expect(session.startCraft("woodPickaxe", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.woodPickaxe.ticksPerItem);
+    expect(session.totalItems("woodPickaxe")).toBe(1);
   });
 
   function putStation(session: GameSession, block: BlockId): void {
@@ -323,7 +342,7 @@ describe("crafting stations and metal progression", () => {
       Block.Air, 0, "foreground", true,
     );
     advance(session, RECIPES.copperIngot.ticksPerItem);
-    expect(session.inventory.copper_ingot).toBe(1);
+    expect(session.totalItems("copper_ingot")).toBe(1);
     expect(session.crafting).toBeNull();
   });
 
@@ -349,9 +368,7 @@ describe("crafting stations and metal progression", () => {
     advance(session, RECIPES.copperPickaxe.ticksPerItem / 2);
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     advance(restored, RECIPES.copperPickaxe.ticksPerItem / 2);
-    expect(restored.inventory.tools).toContainEqual({
-      itemId: "copperPickaxe", quantity: 1, durability: 800,
-    });
+    expect(restored.totalItems("copperPickaxe")).toBe(1);
     expect(restored.canCraft("ironPickaxe")).toBe(false);
 
     restored.inventory.iron_ore = 8;
@@ -370,8 +387,47 @@ describe("crafting stations and metal progression", () => {
     restored.inventory.pine_log = 1;
     expect(restored.startCraft("ironPickaxe", 1)).toEqual({ ok: true });
     advance(restored, RECIPES.ironPickaxe.ticksPerItem);
-    expect(restored.inventory.tools).toContainEqual({
-      itemId: "ironPickaxe", quantity: 1, durability: 1200,
-    });
+    expect(restored.totalItems("ironPickaxe")).toBe(1);
   });
+});
+
+it.each([
+  ["woodSpikes", "pine_log", "workbench", 2],
+  ["ironSpikes", "iron_ingot", "forge", 2],
+] as const)("crafts %s from %s at the %s", (id, material, station, quantity) => {
+  const session = GameSession.create("Pointes", "spikes", 1000);
+  const x = Math.floor((session.player.x + 8) / TILE_SIZE);
+  const y = Math.floor((session.player.y + 20) / TILE_SIZE);
+  session.world.setBlockOnPlane(x + 1, y, Block.Workbench, 0, "foreground", true);
+  if (station === "forge") {
+    session.world.setBlockOnPlane(x + 3, y, Block.Forge, 0, "foreground", true);
+  }
+  session.inventory[material] = 1;
+  expect(session.startCraft(id, quantity)).toEqual({ ok: true });
+  advance(session, quantity * RECIPES[id].ticksPerItem);
+  expect(session.totalItems(id)).toBe(quantity);
+});
+
+it.each([
+  ["smallChest", "pine_log", 8],
+  ["mediumChest", "smallChest", 1],
+  ["largeChest", "mediumChest", 1],
+] as const)("crafts %s using %s", (id, material, amount) => {
+  const session = GameSession.create("Coffres", `recipe-${id}`, 1000);
+  const x = Math.floor((session.player.x + 8) / TILE_SIZE);
+  const y = Math.floor((session.player.y + 20) / TILE_SIZE);
+  session.world.setBlockOnPlane(x + 1, y, Block.Workbench, 0, "foreground", true);
+  session.world.setBlockOnPlane(x + 3, y, Block.Forge, 0, "foreground", true);
+  session.inventory[material] = amount;
+  if (id === "mediumChest") {
+    session.inventory.pine_log = 6;
+    session.inventory.copper_ingot = 2;
+  }
+  if (id === "largeChest") {
+    session.inventory.pine_log = 10;
+    session.inventory.iron_ingot = 4;
+  }
+  expect(session.startCraft(id, 1)).toEqual({ ok: true });
+  advance(session, RECIPES[id].ticksPerItem);
+  expect(session.totalItems(id)).toBe(1);
 });

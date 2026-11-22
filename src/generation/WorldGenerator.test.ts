@@ -179,6 +179,51 @@ describe("versioned world generation", () => {
     expect(generator.backgroundAt(0, 35)).toBe(Block.GoldOre);
   });
 
+  it("uses dirt backgrounds through v7 water columns", () => {
+    const generator = new WorldGenerator("water-background", 7);
+    vi.spyOn(generator, "waterLevelAt").mockReturnValue(20);
+    vi.spyOn(generator, "surfaceAt").mockReturnValue(23);
+    vi.spyOn(generator, "isBackgroundTrunk").mockReturnValue(false);
+    expect(generator.backgroundAt(8, 20)).toBe(Block.Dirt);
+    expect(generator.backgroundAt(8, 21)).toBe(Block.Dirt);
+    expect(generator.backgroundAt(8, 22)).toBe(Block.Dirt);
+  });
+
+  it("spawns collectible fruit pickups on generated leaf cells in v8", () => {
+    const generator = new WorldGenerator("fruit-leaves", 8);
+    let found: { x: number; y: number; item: string } | undefined;
+    for (let x = -500; x <= 500 && !found; x++) {
+      for (let y = 0; y < WORLD_HEIGHT && !found; y++) {
+        const block = generator.blockAt(x, y);
+        if (block !== Block.OakLeaf && block !== Block.PineNeedle) continue;
+        const fruit = generator.pickupsAt(x, y).find((pickup) =>
+          ["apple", "pear", "peach", "apricot"].includes(pickup.itemId));
+        if (fruit) found = { x, y, item: fruit.itemId };
+      }
+    }
+    expect(found).toBeDefined();
+  });
+
+  it("generates biome-configured chests and boosted monster odds in v8 caves", () => {
+    const generator = new WorldGenerator("cave-features", 8);
+    let foundChest: { x: number; y: number; item: string } | undefined;
+    let foundMonster = false;
+    for (let x = -250; x <= 250 && (!foundChest || !foundMonster); x++) {
+      for (let y = 40; y < WORLD_HEIGHT - 2; y++) {
+        const chest = generator.caveChestAt(x, y);
+        if (chest && !foundChest) foundChest = { x, y, item: chest };
+        if (generator.caveMonsterAt(x, y)) foundMonster = true;
+        if (foundChest && foundMonster) break;
+      }
+    }
+    expect(foundChest).toBeDefined();
+    expect(foundMonster).toBe(true);
+    if (!foundChest) throw new Error("Aucun coffre naturel trouvé.");
+    expect(generator.blockAt(foundChest.x, foundChest.y)).not.toBe(Block.Air);
+    const odds = generator.caveOddsAt(foundChest.x);
+    expect(odds.monsterWithChest).toBeGreaterThan(odds.monster);
+  });
+
   it("chooses the nearest generated foreground block by Euclidean distance", () => {
     const generator = new WorldGenerator("distance", 3);
     vi.spyOn(generator, "surfaceAt").mockReturnValue(28);

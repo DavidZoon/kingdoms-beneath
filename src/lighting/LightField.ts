@@ -204,6 +204,8 @@ export function sampleLight(field: LightField, x: number, y: number): { sky: num
   return { sky: field.sky[index], torch: field.torch[index] };
 }
 
-export function lightBrightness(sky: number, torch: number, daylight: number, underground = false): number {
-  return Math.max(underground ? 0 : SURFACE_AMBIENT, sky * daylight, torch);
+export function lightBrightness(
+  sky: number, torch: number, daylight: number, underground = false, moonlight = 0,
+): number {
+  return Math.max(underground ? 0 : SURFACE_AMBIENT, sky * (daylight + moonlight), torch);
 }

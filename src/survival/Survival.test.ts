@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../game/GameSession";
-import { DAY_LENGTH_TICKS } from "../lighting/WorldClock";
+import { DAY_LENGTH_TICKS, dayPhaseAt } from "../lighting/WorldClock";
 import { MAX_GROUND_DROPS } from "../game/GameSession";
 import { parseSave, serializeSave } from "../save/schema";
 import { RESPAWN_TICKS, PLAYER_MAX_HEALTH } from "./SurvivalState";
 import { Block, TILE_SIZE, TOOLS } from "../world/blocks";
-import type { ZombieState } from "../entities/Zombie";
+import { zombieMiningTarget, type ZombieState } from "../entities/Zombie";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
 
@@ -14,7 +14,10 @@ function advance(session: GameSession, ticks: number): void {
 }
 
 function zombie(id: string, x: number, y: number): ZombieState {
-  return { id, x, y, vx: 0, vy: 0, health: 40, grounded: true, attackCooldown: 0 };
+  return {
+    id, x, y, vx: 0, vy: 0, health: 40, grounded: true,
+    attackCooldown: 0, stunTicks: 0, digCooldown: 0,
+  };
 }
 
 describe("player survival", () => {
@@ -43,12 +46,16 @@ describe("player survival", () => {
     expect(session.survival).toMatchObject({ health: 0, dead: true, respawnTicks: RESPAWN_TICKS });
 
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
-    advance(restored, RESPAWN_TICKS - 1);
+    restored.zombies.push(zombie("waiting-night", restored.player.x + 20, restored.player.y));
+    advance(restored, RESPAWN_TICKS + 20);
     expect(restored.survival.dead).toBe(true);
-    advance(restored, 1);
+    expect(restored.zombies).toHaveLength(1);
+    expect(restored.respawnNow()).toEqual({ ok: true });
     expect(restored.survival).toMatchObject({
       health: PLAYER_MAX_HEALTH, dead: false, respawnTicks: 0,
     });
+    expect(dayPhaseAt(restored.tick)).toBe("Jour");
+    expect(restored.zombies).toHaveLength(0);
   });
 
   it.each([
@@ -85,6 +92,8 @@ describe("player survival", () => {
     );
     session.takeDamage(PLAYER_MAX_HEALTH);
     advance(session, RESPAWN_TICKS);
+    expect(session.survival.dead).toBe(true);
+    expect(session.respawnNow()).toEqual({ ok: true });
     expect(session.survival.dead).toBe(false);
     expect(session.player.x).toBe(session.survival.spawnPoint.x);
     expect(session.player.y).toBeLessThan(session.survival.spawnPoint.y);
@@ -105,6 +114,51 @@ describe("player survival", () => {
 });
 
 describe("first night and combat", () => {
+  it("damages actors on wood and iron spikes once per second and wears the trap", () => {
+    const session = GameSession.create("Pointes", "spikes", 1000);
+    const x = Math.floor(session.player.x / TILE_SIZE);
+    const y = Math.floor(session.player.y / TILE_SIZE) + 1;
+    session.world.setBlock(x, y, Block.WoodSpikes, 0, true);
+    session.tick = 60;
+    const trapped = zombie("spike-zombie", session.player.x, session.player.y);
+    session.zombies.push(trapped);
+    const health = session.survival.health;
+    session.step(idle);
+    expect(session.survival.health).toBe(health - 2);
+    expect(trapped.health).toBe(38);
+    expect(session.getBlockDamage(x, y)).toBe(2);
+
+    session.tick = 120;
+    session.world.setBlock(x + 1, y, Block.IronSpikes, 0, true);
+    session.player.x = (x + 1) * TILE_SIZE;
+    trapped.x = (x + 1) * TILE_SIZE;
+    session.survival.invulnerabilityTicks = 0;
+    session.step(idle);
+    expect(session.survival.health).toBe(health - 7);
+    expect(trapped.health).toBe(33);
+    expect(session.getBlockDamage(x + 1, y)).toBe(2);
+  });
+
+  it("lets zombies mine blocking foreground walls within five tiles", () => {
+    const session = GameSession.create("Creusement", "zombie-dig", 1000);
+    session.survival.invulnerabilityTicks = 600;
+    const feetRow = Math.floor((session.player.y + 26) / TILE_SIZE);
+    const wallX = Math.floor(session.player.x / TILE_SIZE) + 2;
+    for (let row = 1; row <= 3; row++) {
+      session.world.setBlock(wallX, feetRow - row, Block.Stone, 0, true);
+    }
+    const enemy = zombie(
+      "digger", (wallX + 2) * TILE_SIZE, session.player.y,
+    );
+    session.zombies.push(enemy);
+    advance(session, 120);
+    expect(zombieMiningTarget(session.world, enemy, session.player), JSON.stringify({
+      enemy, player: session.player, wallX, feetRow,
+    })).not.toBeNull();
+    expect([1, 2, 3].some((row) =>
+      session.getBlockDamage(wallX, feetRow - row) > 0)).toBe(true);
+  });
+
   it("attacks only in front and uses the selected weapon, tool or minimal bare damage", () => {
     const session = GameSession.create("Attaque", "direction", 1000);
     session.selectHotbar(1);
@@ -114,6 +168,7 @@ describe("first night and combat", () => {
     session.zombies.push(front, behind);
     expect(session.attackForward()).toMatchObject({ ok: true, hit: true, damage: 10 });
     expect(front.health).toBe(30);
+    expect(front.stunTicks).toBe(TOOLS.woodSword.stunTicks);
     expect(behind.health).toBe(40);
     expect(session.hotbar[1]).toMatchObject({ durability: 299 });
 
@@ -123,12 +178,33 @@ describe("first night and combat", () => {
     session.selectHotbar(0);
     expect(session.attackForward()).toMatchObject({ ok: true, damage: 4 });
     expect(front.health).toBe(26);
+    expect(front.stunTicks).toBe(0);
 
     advance(session, 18);
     session.hotbar[0] = { itemId: "dirt", quantity: 1 };
     front.x = session.player.x + 12;
     expect(session.attackForward()).toMatchObject({ ok: true, damage: 1 });
     expect(front.health).toBe(25);
+  });
+
+  it("stuns only on weapon hits, preventing the next enemy attacks", () => {
+    const session = GameSession.create("Étourdissement", "stun", 1000);
+    session.selectHotbar(1);
+    const front = zombie("stunned", session.player.x + 20, session.player.y);
+    session.zombies.push(front);
+    expect(session.attackForward()).toMatchObject({ ok: true, hit: true });
+    expect(front.stunTicks).toBe(8);
+    advance(session, 1);
+    expect(front.stunTicks).toBe(7);
+
+    front.stunTicks = 1;
+    front.attackCooldown = 0;
+    front.x = session.player.x + 4;
+    session.takeDamage = () => {
+      throw new Error("Un monstre étourdi ne doit pas infliger de dégâts.");
+    };
+    session.step(idle);
+    expect(front.stunTicks).toBe(0);
   });
 
   it("gives metal weapons greater damage and progressively longer reach", () => {
@@ -216,5 +292,30 @@ describe("first night and combat", () => {
     const startY = first.y;
     for (let tick = 0; tick < 20; tick++) session.step(idle);
     expect(first.y).toBeLessThan(startY);
+  });
+
+  it("lets zombies swim toward the player's depth and climb two foreground blocks", () => {
+    const session = GameSession.create("Nage zombie", "zombie-swim", 1000);
+    const first = zombie("swimmer", session.player.x + 30, session.player.y + 32);
+    for (let x = 7; x <= 15; x++) {
+      for (let y = Math.floor(first.y / TILE_SIZE); y <= 50; y++) {
+        session.world.setBlock(x, y, Block.Water, 0, true);
+      }
+    }
+    session.zombies.push(first);
+    const initialY = first.y;
+    advance(session, 20);
+    expect(first.y).toBeLessThan(initialY);
+
+    const climbSession = GameSession.create("Escalade double", "zombie-two-step", 1000);
+    const climber = zombie("climber", climbSession.player.x + 36, climbSession.player.y);
+    const feetRow = Math.floor((climber.y + 26) / TILE_SIZE);
+    const wallX = Math.floor(climber.x / TILE_SIZE) - 1;
+    climbSession.world.setBlock(wallX, feetRow - 1, Block.Stone, 0, true);
+    climbSession.world.setBlock(wallX, feetRow - 2, Block.Stone, 0, true);
+    climbSession.zombies.push(climber);
+    const climbStart = climber.y;
+    advance(climbSession, 60);
+    expect(climber.y).toBeLessThan(climbStart);
   });
 });

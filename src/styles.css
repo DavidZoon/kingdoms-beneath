@@ -38,9 +38,11 @@ input {
 .menu-screen, .modal-screen, .error-panel, .confirm-dialog { pointer-events: auto; }
 .menu-screen {
   position: absolute; inset: 0; overflow-y: auto;
-  background: linear-gradient(110deg, #10271de8, #173b2bd9 55%, #10211be8);
+  background: linear-gradient(110deg, #10271d73, #173b2b42 55%, #10211b73);
 }
 .menu-landscape { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+.menu-landscape canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.menu-landscape::before, .menu-landscape::after { display: none; }
 .menu-landscape::before, .menu-landscape::after {
   content: ""; position: absolute; left: -10%; right: -10%; bottom: -7%; height: 65%;
   background: #244b3a; opacity: 0.4;
@@ -191,6 +193,19 @@ h3 { font: 400 23px Georgia, serif; }
 }
 .bottom-hud { position: absolute; z-index: 1; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); pointer-events: auto; }
 .action-message { font-size: 12px; text-shadow: 0 1px 3px #000; text-align: center; margin: 0 10px 10px; color: #fff3cc; }
+.bed-actions { display: flex; justify-content: center; gap: 8px; margin: 0 12px 10px; pointer-events: auto; }
+.bed-actions button { min-height: 40px; padding: 7px 12px; font-size: 12px; }
+.bed-actions button:first-child { border-color: #d3b473; }
+.chest-panel { width: min(980px, calc(100% - 24px)); }
+.chest-panel, .chest-layout, .chest-layout > section { position: relative; }
+.chest-player-hotbar, .chest-hotbar, #chest-player-hotbar { position: relative; z-index: 2; pointer-events: auto; }
+.chest-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(320px, 1.2fr); gap: 20px; }
+.chest-layout h3 { margin: 14px 0 8px; font-size: 18px; }
+.chest-hotbar { justify-content: start; grid-template-columns: repeat(5, var(--hotbar-slot)); margin-inline: 0; }
+.chest-hotbar .hotbar-stack { position: relative; aspect-ratio: 1; min-width: var(--hotbar-slot); min-height: var(--hotbar-slot); padding: 0; }
+.chest-hotbar .hotbar-stack { z-index: 3; pointer-events: auto; }
+.chest-slots { grid-template-columns: repeat(auto-fill, var(--hotbar-slot)); max-height: 52dvh; overflow-y: auto; padding: 3px; }
+.inventory-slot.transfer-source, .hotbar-stack.transfer-source { border-color: #f0ca7c; box-shadow: 0 0 0 2px #f0ca7c; }
 .hotbar { display: grid; grid-template-columns: repeat(10, var(--hotbar-slot)); gap: 4px; width: fit-content; max-width: calc(100% - 16px); margin-inline: auto; }
 .hotbar-slot { position: relative; min-width: 0; display: grid; }
 .hotbar .hotbar-stack { position: relative; display: block; aspect-ratio: 1; min-width: 0; min-height: 0; width: 100%; padding: 0; background: #182f26ed; }
@@ -216,8 +231,9 @@ h3 { font: 400 23px Georgia, serif; }
 .item-icon { position: relative; display: inline-grid; width: 20px; height: 20px; grid-row: span 2; }
 .item-icon .block-swatch { display: block; width: 100%; height: 100%; grid-row: auto; }
 .stonePickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
-.copperPickaxe { background: url("/assets/copper-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
-.ironPickaxe { background: url("/assets/iron-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.woodPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: sepia(1) saturate(1.8) hue-rotate(335deg) brightness(.72); }
+.copperPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: sepia(1) saturate(1.7) hue-rotate(330deg); }
+.ironPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: grayscale(1) brightness(1.2) contrast(1.1); }
 .woodSword { background: url("/assets/wood-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
 .copperSword { background: url("/assets/copper-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
 .ironSword { background: url("/assets/iron-sword.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
@@ -242,6 +258,9 @@ h3 { font: 400 23px Georgia, serif; }
 .touch-controls button { min-width: 48px; min-height: 48px; padding: 8px 12px; background: #17362bd9; border-color: #d9e3b866; font-weight: 600; pointer-events: auto; }
 .modal-screen { position: absolute; z-index: 20; inset: 0; background: #081b16bd; display: grid; place-items: center; padding: 20px; overflow-y: auto; }
 .pause-card { width: min(430px, 100%); }
+.death-screen { z-index: 35; background: #160b0bd9; }
+.death-card { width: min(430px, 100%); border-color: #9f4b49; box-shadow: 0 20px 80px #000c; text-align: center; }
+.death-card h2 { color: #f0a39a; font-size: 36px; }
 .pause-card p { color: #b7c6ad; font-size: 14px; line-height: 1.6; }
 .error-panel { position: absolute; z-index: 40; top: 16px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 24px)); padding: 18px; border: 1px solid #cf8960; border-radius: 8px; background: #422d22; box-shadow: 0 12px 40px #0008; }
 .error-panel p { font-size: 13px; line-height: 1.5; }
@@ -278,6 +297,8 @@ h3 { font: 400 23px Georgia, serif; }
   .inventory-panel { padding: 14px; }
   .inventory-layout { grid-template-columns: 1fr; gap: 14px; }
   .craft-panel { border-left: 0; border-top: 1px solid #8798774d; padding: 14px 0 0; }
+  .chest-layout { grid-template-columns: 1fr; }
+  .chest-slots { max-height: 36dvh; }
 }
 @media (max-width: 360px) {
   .action-pad { flex-direction: column; }

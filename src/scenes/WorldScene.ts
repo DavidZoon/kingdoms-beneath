@@ -7,7 +7,10 @@ import { isToolStack } from "../inventory/Inventory";
 import {
   calculateLightField, carriedTorchSource, lightBrightness, withLightSources, type LightField,
 } from "../lighting/LightField";
-import { daylightAt, dayPhaseAt, type DayPhase } from "../lighting/WorldClock";
+import {
+  celestialProgressAt, daylightAt, dayPhaseAt, moonIlluminationAt, moonPhaseAt, moonlightAt,
+  type DayPhase,
+} from "../lighting/WorldClock";
 import { getCrackSegments } from "../rendering/blockCracks";
 import { darkenBackgroundPixels } from "../rendering/backgroundTint";
 import { drawBlockTexture, drawItemTexture } from "../rendering/blockTextures";
@@ -22,6 +25,7 @@ import {
 } from "../world/blocks";
 import { cellKey, chunkOf } from "../world/WorldModel";
 import { isPlantItem } from "../world/resources";
+import { FRUIT_ITEMS } from "../world/resources";
 import { ZOMBIE_MAX_HEALTH } from "../entities/Zombie";
 
 export interface WorldCallbacks {
@@ -42,6 +46,7 @@ export class WorldScene extends Phaser.Scene {
   private lighting!: Phaser.GameObjects.Graphics;
   private dropDurability!: Phaser.GameObjects.Graphics;
   private zombies!: Phaser.GameObjects.Graphics;
+  private damageFlash!: Phaser.GameObjects.Graphics;
   private readonly miningHold = new MiningHold();
   private readonly blockInteraction = new BlockInteraction();
   private tileAtlas!: Phaser.Textures.CanvasTexture;
@@ -59,8 +64,11 @@ export class WorldScene extends Phaser.Scene {
   private lightFieldKey = "";
   private lightRevision = -1;
   private lightRenderKey = "";
+  private renderedForegroundRevision = -1;
   private lastDayPhase: DayPhase = "Jour";
   private attackSwingMs = 0;
+  private damageFlashMs = 0;
+  private lastPlayerHealth = 0;
 
   constructor(
     private readonly session: GameSession,
@@ -73,14 +81,18 @@ export class WorldScene extends Phaser.Scene {
   preload(): void {
     const files: Record<string, string> = {
       stonePickaxe: "stone-pickaxe.png",
-      copperPickaxe: "copper-pickaxe.png",
-      ironPickaxe: "iron-pickaxe.png",
+      woodPickaxe: "stone-pickaxe.png",
+      copperPickaxe: "stone-pickaxe.png",
+      ironPickaxe: "stone-pickaxe.png",
       woodSword: "wood-sword.png",
       copperSword: "copper-sword.png",
       ironSword: "iron-sword.png",
     };
     for (const [item, file] of Object.entries(files)) {
       this.load.image(`drop-${item}`, new URL(`assets/${file}`, document.baseURI).href);
+    }
+    for (const fruit of FRUIT_ITEMS) {
+      this.load.image(`drop-${fruit}`, new URL(`assets/${fruit}.png`, document.baseURI).href);
     }
   }
 
@@ -95,6 +107,7 @@ export class WorldScene extends Phaser.Scene {
     this.lighting = this.add.graphics().setDepth(4.5);
     this.dropDurability = this.add.graphics().setDepth(3.1);
     this.zombies = this.add.graphics().setDepth(3);
+    this.damageFlash = this.add.graphics().setDepth(20);
     this.createTileAtlas();
     this.createDropTextures();
     this.createActor();
@@ -182,6 +195,7 @@ export class WorldScene extends Phaser.Scene {
     });
     this.callbacks.onHud();
     this.lastDayPhase = dayPhaseAt(this.session.tick);
+    this.lastPlayerHealth = this.session.survival.health;
   }
 
   zoomBy(delta: number): void {
@@ -288,6 +302,23 @@ export class WorldScene extends Phaser.Scene {
       this.session.survival.invulnerabilityTicks > 0 && Math.floor(this.session.tick / 4) % 2 === 0 ? 0.45 : 1);
     this.drawZombies();
     this.updateHeldItem(elapsed);
+    if (this.session.survival.health < this.lastPlayerHealth) this.damageFlashMs = 180;
+    this.lastPlayerHealth = this.session.survival.health;
+    this.damageFlashMs = Math.max(0, this.damageFlashMs - elapsed);
+    this.damageFlash.clear();
+    if (this.damageFlashMs > 0) {
+      const view = this.cameras.main.worldView;
+      const alpha = 0.22 + 0.55 * this.damageFlashMs / 180;
+      const edge = 8 / this.cameras.main.zoom;
+      this.damageFlash.fillStyle(0xb3242a, alpha)
+        .fillRect(view.x, view.y, view.width, edge)
+        .fillRect(view.x, view.y + view.height - edge, view.width, edge)
+        .fillRect(view.x, view.y + edge, edge, view.height - edge * 2)
+        .fillRect(view.x + view.width - edge, view.y + edge, edge, view.height - edge * 2);
+      this.damageFlash.lineStyle(6, 0xe5484d, alpha).strokeRect(
+        view.x + 3, view.y + 3, view.width - 6, view.height - 6,
+      );
+    }
     this.updateCameraAndChunks();
     const selectionTarget = plantCell ?? miningCell ?? this.target;
     this.selection.clear().lineStyle(1, this.session.withinReach(this.target.x, this.target.y) ? 0xf6e5ad : 0xc76852);
@@ -334,6 +365,9 @@ export class WorldScene extends Phaser.Scene {
     if (!selected) return;
     const texture = `drop-${selected}`;
     if (this.heldItem.texture.key !== texture) this.heldItem.setTexture(texture);
+    const tint = selected === "woodPickaxe" ? 0xa66d3a : selected === "copperPickaxe" ? 0xd18a4a :
+      selected === "ironPickaxe" ? 0xc8d2d8 : 0xffffff;
+    this.heldItem.setTint(tint);
     const facing = this.session.player.facing ?? 1;
     const progress = this.attackSwingMs > 0 ? 1 - this.attackSwingMs / 140 : 0;
     const swing = this.attackSwingMs > 0 ? (-55 + progress * 110) * facing : -12 * facing;
@@ -407,6 +441,7 @@ export class WorldScene extends Phaser.Scene {
       if (!this.textures.exists(`drop-${item}`)) throw new Error(`Impossible de charger l'icône de ${ITEM_LABELS[item]}.`);
     }
     for (const item of MATERIAL_ITEMS) {
+      if (this.textures.exists(`drop-${item}`)) continue;
       const texture = this.textures.createCanvas(`drop-${item}`, TILE_ART_SIZE, TILE_ART_SIZE);
       if (!texture) throw new Error(`Impossible de créer l'icône de ${ITEM_LABELS[item]}.`);
       drawItemTexture(texture.context, item);
@@ -450,6 +485,9 @@ export class WorldScene extends Phaser.Scene {
         const harvest = drop.id.startsWith("harvest:") || drop.id.startsWith("plant:");
         image = this.add.image(drop.x, drop.y, `drop-${drop.itemId}`)
           .setDisplaySize(TILE_SIZE, TILE_SIZE).setDepth(harvest ? 1 : 3);
+        if (drop.itemId === "woodPickaxe") image.setTint(0xa66d3a);
+        if (drop.itemId === "copperPickaxe") image.setTint(0xd18a4a);
+        if (drop.itemId === "ironPickaxe") image.setTint(0xc8d2d8);
         this.groundDrops.set(drop.id, image);
       }
       image.setPosition(drop.x, drop.y);
@@ -465,6 +503,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateCameraAndChunks(): void {
+    const foregroundRevision = this.session.world.foregroundRevision;
+    if (foregroundRevision !== this.renderedForegroundRevision) {
+      for (const key of [...this.chunks.keys()]) {
+        const [cx, cy] = key.split(",").map(Number);
+        this.redrawChunk(cx, cy);
+      }
+      this.renderedForegroundRevision = foregroundRevision;
+    }
     const camera = this.cameras.main;
     const centerX = this.session.player.x + PLAYER_WIDTH / 2;
     const centerY = cameraFollowY(
@@ -536,6 +582,32 @@ export class WorldScene extends Phaser.Scene {
     this.backdrop.clear();
     this.backdrop.fillStyle(0x91b6a8).fillRect(left, top, width, height);
     const surface = backdropSurfaceY(this.session.world.generator);
+    const progress = celestialProgressAt(this.session.tick);
+    const skyTop = Math.max(top, top + 18);
+    const sunVisible = progress < 1 / 6 || progress >= 5 / 6;
+    const moonVisible = progress >= 1 / 3 && progress < 2 / 3;
+    if (sunVisible) {
+      const dayProgress = ((progress + 1 / 6) % 1) / (1 / 3);
+      const sunX = left + width * (0.05 + dayProgress * 0.9);
+      const sunY = skyTop + 92 - Math.sin(dayProgress * Math.PI) * Math.min(84, surface - skyTop - 38);
+      this.backdrop.fillStyle(0xf5cf65).fillCircle(sunX, sunY, 15);
+      this.backdrop.lineStyle(3, 0xf2d98d, 0.45).strokeCircle(sunX, sunY, 21);
+    }
+    if (moonVisible) {
+      const nightProgress = (progress - 1 / 3) * 3;
+      const moonX = left + width * (0.05 + nightProgress * 0.9);
+      const moonY = skyTop + 92 - Math.sin(nightProgress * Math.PI) * Math.min(84, surface - skyTop - 38);
+      const radius = 12;
+      const illumination = moonIlluminationAt(this.session.tick);
+      if (illumination > 0) {
+        this.backdrop.fillStyle(0xdde4ce).fillCircle(moonX, moonY, radius);
+        if (illumination < 1) {
+          const waxing = moonPhaseAt(this.session.tick) < 4;
+          const shadowOffset = (waxing ? -1 : 1) * radius * 2 * illumination;
+          this.backdrop.fillStyle(0x91b6a8).fillCircle(moonX + shadowOffset, moonY, radius);
+        }
+      }
+    }
     for (const layer of [
       { color: 0x7d9d8b, factor: 0.2, offset: -95, scale: 0.006 },
       { color: 0x608575, factor: 0.55, offset: -35, scale: 0.011 },
@@ -614,6 +686,7 @@ export class WorldScene extends Phaser.Scene {
     this.lightRenderKey = renderKey;
     this.lighting.clear();
     const daylight = daylightStep / levels;
+    const moonlight = moonlightAt(this.session.tick);
     if (bottomCell >= WORLD_HEIGHT) {
       this.lighting.fillStyle(0x09131f, 1).fillRect(
         minX * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE, (maxX - minX + 1) * TILE_SIZE,
@@ -649,13 +722,14 @@ export class WorldScene extends Phaser.Scene {
       drawRuns(y, (index, x) => Math.round(
         (1 - lightBrightness(
           field.sky[index], field.torch[index], daylight, y > this.session.world.generator.surfaceAt(x),
+          moonlight,
         )) * levels,
       ), 0x09131f, 1 / levels);
     }
     if (quality === "standard") {
       for (let y = minY; y <= maxY; y++) {
         drawRuns(y, (index) => Math.round(
-          field.torch[index] * (1 - field.sky[index] * daylight) * 4,
+          field.torch[index] * (1 - field.sky[index] * (daylight + moonlight)) * 4,
         ), 0xdb8736, 0.035);
       }
     }

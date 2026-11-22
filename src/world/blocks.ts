@@ -51,12 +51,19 @@ export const Block = {
   Workbench: 40,
   Furnace: 41,
   Forge: 42,
+  Bed: 43,
+  WoodSpikes: 44,
+  IronSpikes: 45,
+  SmallChest: 46,
+  MediumChest: 47,
+  LargeChest: 48,
 } as const;
 
 export type BlockId = (typeof Block)[keyof typeof Block];
 const CONSTRUCTION_ITEMS = [
   "dirt", "stone", "ladder", "torch", "woodStairs", "stoneStairs", "water",
-  "workbench", "furnace", "forge",
+  "workbench", "furnace", "forge", "bed", "woodSpikes", "ironSpikes",
+  "smallChest", "mediumChest", "largeChest",
 ] as const;
 const PROCESSED_ITEMS = ["copper_ingot", "iron_ingot"] as const;
 export type BlockItemId = (typeof CONSTRUCTION_ITEMS)[number] | ResourceBlockItemId;
@@ -65,7 +72,7 @@ export type MaterialItemId = (typeof CONSTRUCTION_ITEMS)[number] | ProcessedItem
 export const BLOCK_ITEMS: readonly BlockItemId[] = [...CONSTRUCTION_ITEMS, ...RESOURCE_ITEMS.filter(isResourceBlock)];
 export const MATERIAL_ITEMS: readonly MaterialItemId[] = [...CONSTRUCTION_ITEMS, ...PROCESSED_ITEMS, ...RESOURCE_ITEMS];
 export const WEAPON_ITEMS = ["woodSword", "copperSword", "ironSword"] as const;
-export const TOOL_ITEMS = ["stonePickaxe", "copperPickaxe", "ironPickaxe", ...WEAPON_ITEMS] as const;
+export const TOOL_ITEMS = ["woodPickaxe", "stonePickaxe", "copperPickaxe", "ironPickaxe", ...WEAPON_ITEMS] as const;
 export const ITEMS = [...MATERIAL_ITEMS, ...TOOL_ITEMS] as const;
 export type ToolItemId = (typeof TOOL_ITEMS)[number];
 export type ItemId = (typeof ITEMS)[number];
@@ -83,14 +90,17 @@ export const TOOLS: Record<ToolItemId, {
   miningPower: number;
   attackDamage: number;
   attackRange: number;
+  harvestDamage: number;
+  stunTicks: number;
   kind: "tool" | "weapon";
 }> = {
-  stonePickaxe: { category: "tools", maxDurability: 500, miningPower: 2, attackDamage: 4, attackRange: 20, kind: "tool" },
-  copperPickaxe: { category: "tools", maxDurability: 800, miningPower: 4, attackDamage: 8, attackRange: 22, kind: "tool" },
-  ironPickaxe: { category: "tools", maxDurability: 1200, miningPower: 7, attackDamage: 14, attackRange: 24, kind: "tool" },
-  woodSword: { category: "weapons", maxDurability: 300, miningPower: 1, attackDamage: 10, attackRange: 26, kind: "weapon" },
-  copperSword: { category: "weapons", maxDurability: 600, miningPower: 1, attackDamage: 16, attackRange: 30, kind: "weapon" },
-  ironSword: { category: "weapons", maxDurability: 1000, miningPower: 1, attackDamage: 24, attackRange: 36, kind: "weapon" },
+  woodPickaxe: { category: "tools", maxDurability: 250, miningPower: 1, harvestDamage: 1, attackDamage: 2, attackRange: 18, stunTicks: 0, kind: "tool" },
+  stonePickaxe: { category: "tools", maxDurability: 500, miningPower: 2, harvestDamage: 2, attackDamage: 4, attackRange: 20, stunTicks: 0, kind: "tool" },
+  copperPickaxe: { category: "tools", maxDurability: 800, miningPower: 4, harvestDamage: 3, attackDamage: 8, attackRange: 22, stunTicks: 0, kind: "tool" },
+  ironPickaxe: { category: "tools", maxDurability: 1200, miningPower: 7, harvestDamage: 4, attackDamage: 14, attackRange: 24, stunTicks: 0, kind: "tool" },
+  woodSword: { category: "weapons", maxDurability: 300, miningPower: 1, harvestDamage: 1, attackDamage: 10, attackRange: 26, stunTicks: 8, kind: "weapon" },
+  copperSword: { category: "weapons", maxDurability: 600, miningPower: 1, harvestDamage: 1, attackDamage: 16, attackRange: 30, stunTicks: 12, kind: "weapon" },
+  ironSword: { category: "weapons", maxDurability: 1000, miningPower: 1, harvestDamage: 1, attackDamage: 24, attackRange: 36, stunTicks: 16, kind: "weapon" },
 };
 
 export function isToolItem(itemId: ItemId): itemId is ToolItemId {
@@ -123,6 +133,7 @@ export const ITEM_LABELS: Record<ItemId, string> = {
   torch: "Torche",
   woodStairs: "Escalier en bois",
   stoneStairs: "Escalier en pierre",
+  woodPickaxe: "Pioche en bois",
   stonePickaxe: "Pioche en pierre",
   copperPickaxe: "Pioche en cuivre",
   ironPickaxe: "Pioche en fer",
@@ -135,6 +146,12 @@ export const ITEM_LABELS: Record<ItemId, string> = {
   forge: "Forge",
   copper_ingot: "Lingot de cuivre",
   iron_ingot: "Lingot de fer",
+  bed: "Lit",
+  woodSpikes: "Pointes en bois",
+  ironSpikes: "Pointes en fer",
+  smallChest: "Petit coffre en bois",
+  mediumChest: "Coffre moyen",
+  largeChest: "Grand coffre",
   ...Object.fromEntries(RESOURCE_ITEMS.map((item) => [item, RESOURCES[item].label])) as Record<ResourceId, string>,
 };
 
@@ -149,6 +166,12 @@ export const ITEM_BLOCKS: Record<BlockItemId, BlockId> = {
   workbench: Block.Workbench,
   furnace: Block.Furnace,
   forge: Block.Forge,
+  bed: Block.Bed,
+  woodSpikes: Block.WoodSpikes,
+  ironSpikes: Block.IronSpikes,
+  smallChest: Block.SmallChest,
+  mediumChest: Block.MediumChest,
+  largeChest: Block.LargeChest,
   ...Object.fromEntries(RESOURCE_ITEMS.filter(isResourceBlock).map((item) => [item, RESOURCES[item].block])) as Record<ResourceBlockItemId, BlockId>,
 };
 
@@ -159,6 +182,7 @@ export const ITEM_PLANES: Record<ItemId, readonly ConstructionPlane[]> = {
   torch: ["foreground"],
   woodStairs: ["foreground", "background"],
   stoneStairs: ["foreground", "background"],
+  woodPickaxe: [],
   stonePickaxe: [],
   copperPickaxe: [],
   ironPickaxe: [],
@@ -169,6 +193,12 @@ export const ITEM_PLANES: Record<ItemId, readonly ConstructionPlane[]> = {
   workbench: ["foreground"],
   furnace: ["foreground"],
   forge: ["foreground"],
+  bed: ["foreground"],
+  woodSpikes: ["foreground"],
+  ironSpikes: ["foreground"],
+  smallChest: ["foreground"],
+  mediumChest: ["foreground"],
+  largeChest: ["foreground"],
   copper_ingot: ["foreground"],
   iron_ingot: ["foreground"],
   ...Object.fromEntries<readonly ConstructionPlane[]>(RESOURCE_ITEMS.map((item) => [item, RESOURCES[item].planes])) as Record<ResourceId, readonly ConstructionPlane[]>,
@@ -210,6 +240,12 @@ export const BLOCKS: Record<
   [Block.Workbench]: { color: "#9b673a", solid: false, drop: "workbench", durability: 12, opacity: 1 },
   [Block.Furnace]: { color: "#71615a", solid: false, drop: "furnace", durability: 20, opacity: 1 },
   [Block.Forge]: { color: "#5b6062", solid: false, drop: "forge", durability: 28, opacity: 1 },
+  [Block.Bed]: { color: "#a66c5c", solid: false, drop: "bed", durability: 10, opacity: 0.35 },
+  [Block.WoodSpikes]: { color: "#9b6b3f", solid: false, drop: "woodSpikes", durability: 120, opacity: 0 },
+  [Block.IronSpikes]: { color: "#889196", solid: false, drop: "ironSpikes", durability: 240, opacity: 0 },
+  [Block.SmallChest]: { color: "#9b673a", solid: false, drop: "smallChest", durability: 18, opacity: 0.5 },
+  [Block.MediumChest]: { color: "#996f43", solid: false, drop: "mediumChest", durability: 28, opacity: 0.55 },
+  [Block.LargeChest]: { color: "#765432", solid: false, drop: "largeChest", durability: 40, opacity: 0.6 },
   ...Object.fromEntries(RESOURCE_ITEMS.filter(isResourceBlock).map((item) => {
     const resource = RESOURCES[item];
     return [resource.block, { color: resource.color, solid: resource.solid, drop: item,

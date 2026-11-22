@@ -7,10 +7,17 @@ export interface RespawnPoint {
   y: number;
 }
 
+export interface BedRespawnPoint {
+  x: number;
+  y: number;
+}
+
 export interface SurvivalState {
   health: number;
   invulnerabilityTicks: number;
   dead: boolean;
   respawnTicks: number;
   spawnPoint: RespawnPoint;
+  initialSpawnPoint: RespawnPoint;
+  respawnBed: BedRespawnPoint | null;
 }

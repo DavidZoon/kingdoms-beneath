@@ -17,9 +17,10 @@ import {
   PLAYER_MAX_HEALTH, RESPAWN_INVULNERABILITY_TICKS, RESPAWN_TICKS, type SurvivalState,
 } from "../survival/SurvivalState";
 import {
-  ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_MAX_HEALTH, ZOMBIE_HEIGHT, ZOMBIE_WIDTH,
+  ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_DIG_COOLDOWN, ZOMBIE_MAX_HEALTH, ZOMBIE_HEIGHT, ZOMBIE_WIDTH,
   zombieOverlapsSolid, type NightWaveState, type ZombieState,
 } from "../entities/Zombie";
+import { CHEST_CAPACITY, CHEST_ITEMS, CHEST_BLOCKS, type ChestState } from "../inventory/Chest";
 
 export const MAX_SAVE_BYTES = 10 * 1024 * 1024;
 
@@ -44,14 +45,21 @@ function text(value: unknown, max: number): value is string {
 }
 
 function itemAvailableInVersion(itemId: ItemId, version: unknown): boolean {
-  if (itemId === "woodSword" || itemId === "copperSword" || itemId === "ironSword") return version === 13;
-  if (itemId === "copperPickaxe" || itemId === "ironPickaxe") return integer(version, 11, 13);
+  if (itemId === "apple" || itemId === "pear" || itemId === "peach" || itemId === "apricot") {
+    return integer(version, 17, 18);
+  }
+  if (itemId === "smallChest" || itemId === "mediumChest" || itemId === "largeChest") return integer(version, 16, 18);
+  if (itemId === "woodSpikes" || itemId === "ironSpikes") return integer(version, 15, 18);
+  if (itemId === "bed") return integer(version, 14, 18);
+  if (itemId === "woodPickaxe") return integer(version, 14, 18);
+  if (itemId === "woodSword" || itemId === "copperSword" || itemId === "ironSword") return integer(version, 13, 18);
+  if (itemId === "copperPickaxe" || itemId === "ironPickaxe") return integer(version, 11, 18);
   if (itemId === "workbench" || itemId === "furnace" || itemId === "forge" ||
-      itemId === "copper_ingot" || itemId === "iron_ingot") return integer(version, 11, 13);
-  if (isToolItem(itemId)) return integer(version, 8, 13);
-  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 13);
-  if (itemId === "torch") return integer(version, 4, 13);
-  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 13);
+      itemId === "copper_ingot" || itemId === "iron_ingot") return integer(version, 11, 18);
+  if (isToolItem(itemId)) return integer(version, 8, 18);
+  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 18);
+  if (itemId === "torch") return integer(version, 4, 18);
+  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 18);
 }
 
 function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean, location = "objet"): ItemStack {
@@ -102,19 +110,26 @@ export function validateSave(value: unknown): SaveGame {
     value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 ||
     value.schemaVersion === 7 || value.schemaVersion === 8 || value.schemaVersion === 9 ||
     value.schemaVersion === 10 || value.schemaVersion === 11 || value.schemaVersion === 12 ||
-    value.schemaVersion === 13) &&
+    value.schemaVersion === 13 || value.schemaVersion === 14 || value.schemaVersion === 15 ||
+    value.schemaVersion === 16 || value.schemaVersion === 17 || value.schemaVersion === 18) &&
     (value.generatorVersion === 1 || value.generatorVersion === 2 ||
-      (integer(value.schemaVersion, 7, 13) && value.generatorVersion === 3) ||
-      (integer(value.schemaVersion, 9, 13) && value.generatorVersion === 4) ||
-      (integer(value.schemaVersion, 10, 13) && value.generatorVersion === 5) ||
-      (value.schemaVersion === 13 && value.generatorVersion === 6));
+      (integer(value.schemaVersion, 7, 18) && value.generatorVersion === 3) ||
+      (integer(value.schemaVersion, 9, 18) && value.generatorVersion === 4) ||
+      (integer(value.schemaVersion, 10, 18) && value.generatorVersion === 5) ||
+      (integer(value.schemaVersion, 13, 18) && value.generatorVersion === 6) ||
+      (integer(value.schemaVersion, 17, 18) && value.generatorVersion === 7) ||
+      (value.schemaVersion === 18 && value.generatorVersion === 8));
   if (!legacy && !current) {
     throw new SaveValidationError("Version de sauvegarde ou de générateur non prise en charge.");
   }
-  const hasSurvival = integer(value.schemaVersion, 12, 13);
-  const hasAdvancedCrafting = integer(value.schemaVersion, 11, 13);
-  const hasCombatWeapons = value.schemaVersion === 13;
-  const hasResources = integer(value.schemaVersion, 9, 13);
+  const hasFruits = integer(value.schemaVersion, 17, 18);
+  const hasTraps = integer(value.schemaVersion, 15, 18);
+  const hasChests = integer(value.schemaVersion, 16, 18);
+  const hasBed = integer(value.schemaVersion, 14, 18);
+  const hasSurvival = integer(value.schemaVersion, 12, 18);
+  const hasAdvancedCrafting = integer(value.schemaVersion, 11, 18);
+  const hasCombatWeapons = integer(value.schemaVersion, 13, 18);
+  const hasResources = integer(value.schemaVersion, 9, 18);
   const hasTools = value.schemaVersion === 8 || hasResources;
   const hasLayers = value.schemaVersion === 7 || hasTools;
   const hasRotations = value.schemaVersion === 6 || hasLayers;
@@ -183,7 +198,12 @@ export function validateSave(value: unknown): SaveGame {
     for (const item of MATERIAL_ITEMS) {
       const advancedItem = item === "workbench" || item === "furnace" || item === "forge" ||
         item === "copper_ingot" || item === "iron_ingot";
-      const quantity = advancedItem && !hasAdvancedCrafting ? 0 : inventory[item];
+      const missingNewItem = (advancedItem && !hasAdvancedCrafting) ||
+        (item === "bed" && !hasBed) ||
+        ((item === "woodSpikes" || item === "ironSpikes") && !hasTraps) ||
+        ((item === "smallChest" || item === "mediumChest" || item === "largeChest") && !hasChests) ||
+        ((item === "apple" || item === "pear" || item === "peach" || item === "apricot") && !hasFruits);
+      const quantity = missingNewItem ? 0 : inventory[item];
       if (!integer(quantity, 0, MAX_STACK)) throw new SaveValidationError(`Quantité de ${item} invalide.`);
       validatedInventory[item] = quantity;
     }
@@ -244,6 +264,10 @@ export function validateSave(value: unknown): SaveGame {
           (!hasAdvancedCrafting && ["workbench", "furnace", "copperIngot", "copperPickaxe",
             "forge", "ironIngot", "ironPickaxe"].includes(job.recipeId)) ||
           (!hasCombatWeapons && ["woodSword", "copperSword", "ironSword"].includes(job.recipeId)) ||
+          (!hasBed && (job.recipeId === "bed" || job.recipeId === "woodPickaxe")) ||
+          (!hasTraps && (job.recipeId === "woodSpikes" || job.recipeId === "ironSpikes")) ||
+          (!hasChests && (job.recipeId === "smallChest" || job.recipeId === "mediumChest" ||
+            job.recipeId === "largeChest")) ||
           (!hasTools && job.recipeId === "stonePickaxe") ||
           typeof job.quantity !== "number" || !validCraftQuantity(RECIPES[job.recipeId], job.quantity) ||
           !integer(job.completed, 0, job.quantity - 1) ||
@@ -307,7 +331,11 @@ export function validateSave(value: unknown): SaveGame {
         (!hasLighting && edit.block === Block.Torch) ||
         (!hasHotbar && (edit.block === Block.WoodStairs || edit.block === Block.StoneStairs)) ||
         (!hasAdvancedCrafting && (edit.block === Block.Workbench || edit.block === Block.Furnace ||
-          edit.block === Block.Forge))) {
+          edit.block === Block.Forge)) ||
+        (!hasBed && edit.block === Block.Bed) ||
+        (!hasTraps && (edit.block === Block.WoodSpikes || edit.block === Block.IronSpikes)) ||
+        (!hasChests && (edit.block === Block.SmallChest || edit.block === Block.MediumChest ||
+          edit.block === Block.LargeChest))) {
       throw new SaveValidationError("Modification de terrain invalide.");
     }
     const key = cellKey(edit.x, edit.y);
@@ -321,7 +349,8 @@ export function validateSave(value: unknown): SaveGame {
   });
   const generatorVersion = value.generatorVersion === 1 ? 1 : value.generatorVersion === 2 ? 2 :
     value.generatorVersion === 3 ? 3 : value.generatorVersion === 4 ? 4 :
-      value.generatorVersion === 5 ? 5 : 6;
+      value.generatorVersion === 5 ? 5 : value.generatorVersion === 6 ? 6 :
+        value.generatorVersion === 7 ? 7 : 8;
   const generatedWorld = new WorldModel(value.seed, edits, generatorVersion);
   const rawBackgroundEdits = hasLayers ? value.backgroundEdits : [];
   if (!Array.isArray(rawBackgroundEdits) || edits.length + rawBackgroundEdits.length > MAX_EDITS) {
@@ -384,7 +413,18 @@ export function validateSave(value: unknown): SaveGame {
   const collected = new Set<string>();
   for (const id of rawCollected) {
     if (typeof id !== "string" || collected.has(id)) throw new SaveValidationError("Récolte naturelle invalide ou dupliquée.");
-    const match = /^natural:(-?\d+),(\d+):(fish_raw|shell|pearl)$/.exec(id);
+    const caveMatch = /^cave-monster:(-?\d+),(\d+)$/.exec(id);
+    if (caveMatch) {
+      const x = Number(caveMatch[1]);
+      const y = Number(caveMatch[2]);
+      if (!integer(x, -MAX_TILE_X, MAX_TILE_X) || !integer(y, 0, WORLD_HEIGHT - 2) ||
+          id !== `cave-monster:${x},${y}` || !world.generator.caveMonsterAt(x, y)) {
+        throw new SaveValidationError("Monstre naturel invalide.");
+      }
+      collected.add(id);
+      continue;
+    }
+    const match = /^natural:(-?\d+),(\d+):(fish_raw|shell|pearl|apple|pear|peach|apricot)$/.exec(id);
     if (!match || !integer(Number(match[1]), -MAX_TILE_X, MAX_TILE_X) ||
         !integer(Number(match[2]), 0, WORLD_HEIGHT - 2) ||
         id !== `natural:${Number(match[1])},${Number(match[2])}:${match[3]}` ||
@@ -393,7 +433,7 @@ export function validateSave(value: unknown): SaveGame {
     }
     collected.add(id);
   }
-  const rawPlants = integer(value.schemaVersion, 10, 13) ? value.collectedPlants : [];
+  const rawPlants = integer(value.schemaVersion, 10, 18) ? value.collectedPlants : [];
   if (!Array.isArray(rawPlants) || rawPlants.length > MAX_EDITS) {
     throw new SaveValidationError("Liste de plantes récoltées invalide.");
   }
@@ -412,10 +452,17 @@ export function validateSave(value: unknown): SaveGame {
     }
     collectedPlants.add(id);
   }
-  const rawSurvival = hasSurvival ? value.survival : {
+  const rawSurvival = hasSurvival && record(value.survival) ? {
+    ...value.survival,
+    initialSpawnPoint: record(value.survival.initialSpawnPoint)
+      ? value.survival.initialSpawnPoint : value.survival.spawnPoint,
+    respawnBed: value.survival.respawnBed ?? null,
+  } : {
     health: PLAYER_MAX_HEALTH, invulnerabilityTicks: 0, dead: false, respawnTicks: 0,
-    spawnPoint: { x: playerX, y: playerY },
+    spawnPoint: { x: playerX, y: playerY }, initialSpawnPoint: { x: playerX, y: playerY },
+    respawnBed: null,
   };
+  const rawRespawnBed = record(rawSurvival) ? rawSurvival.respawnBed : undefined;
   if (!record(rawSurvival) ||
       !integer(rawSurvival.health, 0, PLAYER_MAX_HEALTH) ||
       !integer(rawSurvival.invulnerabilityTicks, 0, RESPAWN_INVULNERABILITY_TICKS) ||
@@ -425,7 +472,13 @@ export function validateSave(value: unknown): SaveGame {
         : rawSurvival.health === 0 || rawSurvival.respawnTicks !== 0) ||
       !record(rawSurvival.spawnPoint) ||
       !finite(rawSurvival.spawnPoint.x, -MAX_TILE_X * TILE_SIZE, MAX_TILE_X * TILE_SIZE - PLAYER_WIDTH) ||
-      !finite(rawSurvival.spawnPoint.y, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - PLAYER_HEIGHT)) {
+      !finite(rawSurvival.spawnPoint.y, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - PLAYER_HEIGHT) ||
+      !record(rawSurvival.initialSpawnPoint) ||
+      !finite(rawSurvival.initialSpawnPoint.x, -MAX_TILE_X * TILE_SIZE, MAX_TILE_X * TILE_SIZE - PLAYER_WIDTH) ||
+      !finite(rawSurvival.initialSpawnPoint.y, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - PLAYER_HEIGHT) ||
+      (rawRespawnBed !== null && (!record(rawRespawnBed) ||
+        !integer(rawRespawnBed.x, -MAX_TILE_X, MAX_TILE_X) ||
+        !integer(rawRespawnBed.y, 0, WORLD_HEIGHT - 2)))) {
     throw new SaveValidationError("État de survie invalide.");
   }
   const survival: SurvivalState = {
@@ -434,6 +487,13 @@ export function validateSave(value: unknown): SaveGame {
     dead: rawSurvival.dead,
     respawnTicks: rawSurvival.respawnTicks,
     spawnPoint: { x: rawSurvival.spawnPoint.x, y: rawSurvival.spawnPoint.y },
+    initialSpawnPoint: {
+      x: rawSurvival.initialSpawnPoint.x, y: rawSurvival.initialSpawnPoint.y,
+    },
+    respawnBed: record(rawRespawnBed) && integer(rawRespawnBed.x, -MAX_TILE_X, MAX_TILE_X) &&
+        integer(rawRespawnBed.y, 0, WORLD_HEIGHT - 2) ? {
+      x: rawRespawnBed.x, y: rawRespawnBed.y,
+    } : null,
   };
   const difficulty = hasSurvival ? value.difficulty : "standard";
   if (!isDifficultyId(difficulty)) throw new SaveValidationError("Difficulté de sauvegarde invalide.");
@@ -453,13 +513,19 @@ export function validateSave(value: unknown): SaveGame {
         !finite(entry.vx, -100, 100) || !finite(entry.vy, -400, 400) ||
         !integer(entry.health, 1, ZOMBIE_MAX_HEALTH) ||
         typeof entry.grounded !== "boolean" ||
-        !integer(entry.attackCooldown, 0, ZOMBIE_ATTACK_COOLDOWN)) {
+        !integer(entry.attackCooldown, 0, ZOMBIE_ATTACK_COOLDOWN) ||
+        (entry.digCooldown !== undefined &&
+          !integer(entry.digCooldown, 0, ZOMBIE_DIG_COOLDOWN)) ||
+        (entry.stunTicks !== undefined &&
+          !integer(entry.stunTicks, 0, 16))) {
       throw new SaveValidationError("Zombie de sauvegarde invalide.");
     }
     zombieIds.add(entry.id);
     const zombie = {
       id: entry.id, x: entry.x, y: entry.y, vx: entry.vx, vy: entry.vy, health: entry.health,
       grounded: entry.grounded, attackCooldown: entry.attackCooldown,
+      stunTicks: entry.stunTicks ?? 0,
+      digCooldown: entry.digCooldown ?? 0,
     };
     if (zombieOverlapsSolid(world, zombie)) throw new SaveValidationError("Zombie bloqué dans un bloc solide.");
     return zombie;
@@ -481,8 +547,32 @@ export function validateSave(value: unknown): SaveGame {
     pending: rawNightWave.pending,
     nextSpawnTick: rawNightWave.nextSpawnTick,
   };
+  const rawChests = hasChests ? value.chests : [];
+  if (!Array.isArray(rawChests) || rawChests.length > MAX_EDITS) {
+    throw new SaveValidationError("Liste de coffres invalide ou trop volumineuse.");
+  }
+  const chestCells = new Set<string>();
+  const chests: ChestState[] = rawChests.map((entry: unknown) => {
+    if (!record(entry) || !CHEST_ITEMS.some((item) => item === entry.itemId) ||
+        !integer(entry.x, -MAX_TILE_X, MAX_TILE_X) ||
+        !integer(entry.y, 0, WORLD_HEIGHT - 2) ||
+        !Array.isArray(entry.slots)) {
+      throw new SaveValidationError("Coffre de sauvegarde invalide.");
+    }
+    const itemId = entry.itemId as keyof typeof CHEST_CAPACITY;
+    const key = cellKey(entry.x, entry.y);
+    if (chestCells.has(key) || world.getBlock(entry.x, entry.y) !== CHEST_BLOCKS[itemId] ||
+        entry.slots.length !== CHEST_CAPACITY[itemId]) {
+      throw new SaveValidationError("Emplacement ou capacité de coffre invalide.");
+    }
+    chestCells.add(key);
+    return {
+      x: entry.x, y: entry.y, itemId,
+      slots: entry.slots.map((slot: unknown) => slot === null ? null : validateStack(slot, true, true, "coffre")),
+    };
+  });
   const result: SaveGame = {
-    format: "kingdoms-beneath", schemaVersion: 13, generatorVersion,
+    format: "kingdoms-beneath", schemaVersion: 18, generatorVersion,
     id: value.id, name: value.name, seed: value.seed,
     createdAt: value.createdAt, updatedAt: value.updatedAt, tick: value.tick,
     player: {
@@ -494,7 +584,7 @@ export function validateSave(value: unknown): SaveGame {
     groundDrops, creativeMode, blockDamage, lightingQuality,
     collectedNaturalPickups: [...collected].sort(),
     collectedPlants: [...collectedPlants].sort(),
-    difficulty, survival, zombies, nightWave,
+    difficulty, survival, zombies, nightWave, chests,
   };
   if (playerOverlapsSolid(world, result.player)) {
     throw new SaveValidationError("Le joueur est bloqué dans un bloc solide.");

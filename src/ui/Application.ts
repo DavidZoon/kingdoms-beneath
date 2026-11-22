@@ -4,7 +4,11 @@ import { InputController } from "../input/InputController";
 import { SaveRepository } from "../save/SaveRepository";
 import { MAX_SAVE_BYTES, SaveValidationError, parseSave, serializeSave } from "../save/schema";
 import type { SaveGame } from "../save/types";
-import { ITEMS, TOOL_ITEMS, WEAPON_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE, canUseItemOnPlane, isBlockItem, isItemId, isToolItem, type ItemId } from "../world/blocks";
+import {
+  Block, ITEMS, TOOL_ITEMS, WEAPON_ITEMS, TOOLS, ITEM_LABELS, TILE_SIZE,
+  canUseItemOnPlane, isBlockItem, isItemId, isToolItem, type ItemId,
+} from "../world/blocks";
+import { PLAYER_HEIGHT } from "../player/PlayerController";
 import {
   getStacks, HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT, ITEM_CAPACITY, isToolStack, type ItemStack, type SlotLocation,
 } from "../inventory/Inventory";
@@ -13,6 +17,7 @@ import {
 } from "../crafting/Recipes";
 import { dayPhaseAt } from "../lighting/WorldClock";
 import { isLightingQuality } from "../lighting/quality";
+import { isConsumableItem } from "../world/resources";
 import { hudCameraCenter } from "../rendering/camera";
 import { itemIconUrl } from "../rendering/blockTextures";
 import { InstallPrompt, isRunningAsApp } from "../pwa/installPrompt";
@@ -27,6 +32,9 @@ import { PLAYER_MAX_HEALTH } from "../survival/SurvivalState";
 
 type StackSource = SlotLocation & { stack: ItemStack };
 type TouchDrag = { pointerId: number; x: number; y: number; source: StackSource; moved: boolean };
+type ChestTransferSource =
+  | { area: "player"; location: SlotLocation }
+  | { area: "chest"; index: number };
 
 function itemIcon(stack: ItemStack): string {
   const tool = isToolStack(stack);
@@ -87,6 +95,7 @@ export class Application {
   private saved: SaveGame | null = null;
   private session: GameSession | null = null;
   private game: Game | null = null;
+  private menuGame: Game | null = null;
   private busy = false;
   private paused = false;
   private storageReady = false;
@@ -96,6 +105,9 @@ export class Application {
   private transferSource: StackSource | null = null;
   private dragSource: StackSource | null = null;
   private touchDrag: TouchDrag | null = null;
+  private openChestPosition: { x: number; y: number } | null = null;
+  private chestTransferSource: ChestTransferSource | null = null;
+  private chestRenderKey = "";
   private suppressSlotClick = false;
   private lastCraft: { recipeId: RecipeId; quantity: number } | null = null;
   private finishedCraft: { recipeId: RecipeId; quantity: number } | null = null;
@@ -108,7 +120,7 @@ export class Application {
     this.root.id = "app-ui";
     this.root.innerHTML = `
       <section id="main-menu" class="menu-screen" aria-labelledby="game-title">
-        <div class="menu-landscape" aria-hidden="true"><div class="sun"></div></div>
+        <div class="menu-landscape" aria-hidden="true"></div>
         <div class="menu-layout">
           <header class="brand">
             <p class="eyebrow">Survie · Exploration · Colonie</p>
@@ -256,9 +268,36 @@ export class Application {
           </form>
           <p id="dev-notice" class="notice" role="status"></p>
         </section>
+        <section id="chest-panel" class="inventory-panel chest-panel" hidden aria-labelledby="chest-title">
+          <div class="inventory-heading">
+            <div><p class="eyebrow">Stockage commun</p><h2 id="chest-title">Coffre</h2></div>
+            <button id="close-chest" type="button" aria-label="Fermer le coffre">Fermer</button>
+          </div>
+          <p class="inventory-help">Sélectionnez une pile, puis un emplacement de l'autre côté pour la transférer.</p>
+          <div class="chest-layout">
+            <section>
+              <h3>Votre inventaire</h3>
+              <div id="chest-player-inventory" class="inventory-slots" role="group" aria-label="Inventaire du joueur"></div>
+              <h3>Votre barre de raccourcis</h3>
+              <div id="chest-player-hotbar" class="hotbar chest-hotbar" role="group" aria-label="Raccourcis du joueur"></div>
+            </section>
+            <section>
+              <h3 id="chest-capacity-title">Contenu du coffre</h3>
+              <div id="chest-slots" class="inventory-slots chest-slots" role="group" aria-label="Emplacements du coffre"></div>
+            </section>
+          </div>
+          <p id="chest-notice" class="notice" role="status"></p>
+        </section>
         <div id="drag-preview" class="drag-preview" aria-hidden="true" hidden></div>
         <div class="bottom-hud" data-camera-edge="bottom">
           <p id="action-message" class="action-message" role="status">Explorez et préparez votre premier abri.</p>
+          <div id="bed-actions" class="bed-actions" hidden role="group" aria-label="Actions du lit">
+            <button id="set-bed-respawn" type="button">Définir comme point de réapparition</button>
+            <button id="rest-at-bed" type="button">Se reposer jusqu'au soir</button>
+          </div>
+          <div id="chest-open-actions" class="bed-actions" hidden>
+            <button id="open-chest" type="button">Ouvrir le coffre</button>
+          </div>
           ${hotbarMarkup("hud-hotbar")}
           <div class="touch-controls" data-camera-edge="bottom">
             <div class="movement-pad" role="group" aria-label="Croix directionnelle">
@@ -271,7 +310,20 @@ export class Application {
               <button data-hold="run">Courrir</button>
               <button data-hold="jump">Sauter</button>
               <button data-hold="attack" class="attack-button">Attaquer</button>
+              <button id="consume-selected" class="consume-button" type="button" hidden>Consommer</button>
             </div>
+          </div>
+        </div>
+      </section>
+      <section id="death-screen" class="modal-screen death-screen" hidden role="dialog" aria-modal="true"
+          aria-labelledby="death-title">
+        <div class="menu-card death-card">
+          <p class="eyebrow">La traversée s'interrompt</p>
+          <h2 id="death-title">Vous êtes mort ☠️</h2>
+          <p>Votre réapparition vous ramène au point défini, au matin. Les monstres de la nuit auront disparu.</p>
+          <div class="menu-actions">
+            <button id="respawn-player" class="primary" type="button">Réapparaître</button>
+            <button id="death-return-menu" type="button">Retour au menu principal</button>
           </div>
         </div>
       </section>
@@ -455,6 +507,28 @@ export class Application {
     this.element("close-inventory").addEventListener("click", () => this.toggleInventory(false));
     this.element("open-dev").addEventListener("click", () => this.toggleDev());
     this.element("close-dev").addEventListener("click", () => this.toggleDev(false));
+    this.element("open-chest").addEventListener("click", () => this.toggleChest(true));
+    this.element("close-chest").addEventListener("click", () => this.toggleChest(false));
+    this.element("chest-panel").addEventListener("click", (event) => {
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest<HTMLButtonElement>("[data-chest-slot], [data-chest-player-area]");
+      if (button) this.handleChestTransferClick(button);
+    });
+    this.element("set-bed-respawn").addEventListener("click", () => {
+      if (!this.session) return;
+      const result = this.session.setRespawnAtNearbyBed();
+      this.element("action-message").textContent = result.ok
+        ? "Lit défini comme point de réapparition." : result.reason;
+      this.updateHud();
+    });
+    this.element("rest-at-bed").addEventListener("click", () => {
+      if (!this.session) return;
+      const result = this.session.restAtNearbyBed();
+      this.element("action-message").textContent = result.ok
+        ? `Repos terminé : ${result.target === "morning" ? "le matin est arrivé" : "le soir est arrivé"}.`
+        : result.reason;
+      this.updateHud();
+    });
     this.element("dev-panel").addEventListener("keydown", (event) => {
       if ((event.key === " " || event.key === "Enter") && event.target instanceof Element &&
           event.target.closest("[data-dev-resource]")) {
@@ -580,6 +654,14 @@ export class Application {
       this.updateHud();
     });
     this.element("continue-game").addEventListener("click", () => this.setPaused(false));
+    this.element("consume-selected").addEventListener("click", () => {
+      if (!this.session) return;
+      const result = this.session.consumeSelected();
+      this.element("action-message").textContent = result.ok
+        ? `Objet consommé : ${result.healed} point${result.healed === 1 ? "" : "s"} de vie restauré${result.healed === 1 ? "" : "s"}.`
+        : result.reason;
+      this.updateHud();
+    });
     this.element("zoom-in").addEventListener("click", () => this.game?.zoomBy(0.5));
     this.element("zoom-out").addEventListener("click", () => this.game?.zoomBy(-0.5));
     this.element("save-game").addEventListener("click", () => { void this.run(() => this.saveCurrent()); });
@@ -590,21 +672,23 @@ export class Application {
       });
     });
     this.element("return-menu").addEventListener("click", () => {
-      void this.run(async () => {
-        await this.saveCurrent();
-        this.game?.destroy();
-        this.game = null;
-        this.session = null;
-        this.controls.setMode("menu");
-        this.element("play-ui").hidden = true;
-        this.element("pause-screen").hidden = true;
-        this.element("dev-panel").hidden = true;
-        this.element("inventory-panel").hidden = true;
-        this.element("main-menu").hidden = false;
-        this.element("new-game-form").hidden = true;
-        this.element("menu-notice").textContent = "Partie sauvegardée.";
-        this.element("resume-game").focus();
-      });
+      void this.run(() => this.returnToMainMenu());
+    });
+    this.element("respawn-player").addEventListener("click", () => {
+      if (!this.session) return;
+      const result = this.session.respawnNow();
+      if (!result.ok) {
+        this.element("action-message").textContent = result.reason;
+        return;
+      }
+      this.element("death-screen").hidden = true;
+      this.element("play-ui").inert = false;
+      this.controls.setInventoryOpen(false);
+      this.element("action-message").textContent = "Vous réapparaissez au matin. Les monstres ont disparu.";
+      this.updateHud();
+    });
+    this.element("death-return-menu").addEventListener("click", () => {
+      void this.run(() => this.returnToMainMenu());
     });
     this.element("retry-operation").addEventListener("click", () => {
       void this.run(() => this.session ? this.saveCurrent() : this.loadMenu());
@@ -706,6 +790,7 @@ export class Application {
   }
 
   private async loadMenu(): Promise<void> {
+    this.ensureMenuPreview();
     try {
       this.saved = await this.repository.read();
       this.storageReady = true;
@@ -715,6 +800,41 @@ export class Application {
       this.unreadableSave = this.storageReady;
       throw error;
     }
+  }
+
+  private ensureMenuPreview(): void {
+    if (this.menuGame || this.session) return;
+    const preview = GameSession.create("Aperçu accueil", crypto.randomUUID(), Date.now());
+    preview.tick = 0;
+    const ground = preview.world.generator.surfaceAt(8);
+    const houseLeft = 30;
+    const houseRight = 42;
+    for (let x = houseLeft; x <= houseRight; x++) {
+      for (let y = ground - 8; y <= ground - 1; y++) preview.world.setBlock(x, y, Block.Air);
+      preview.world.setBlock(x, ground, Block.Stone, 0, true);
+    }
+    for (let y = ground - 6; y <= ground - 1; y++) {
+      preview.world.setBlock(houseLeft, y, Block.Stone, 0, true);
+      preview.world.setBlock(houseRight, y, Block.Stone, 0, true);
+    }
+    for (let x = houseLeft; x <= houseRight; x++) {
+      preview.world.setBlock(x, ground - 7, Block.Stone, 0, true);
+      if (x !== houseLeft + 3 && x !== houseRight - 1) {
+        preview.world.setBlock(x, ground - 1, Block.Stone, 0, true);
+      }
+    }
+    preview.world.setBlock(houseLeft + 3, ground - 1, Block.Bed, 0, true);
+    preview.world.setBlock(houseLeft + 4, ground - 1, Block.Air);
+    preview.world.setBlock(houseLeft + 8, ground - 1, Block.Workbench, 0, true);
+    preview.world.setBlock(houseRight - 1, ground - 1, Block.LargeChest, 0, true);
+    preview.player.x = 0;
+    preview.player.y = ground * TILE_SIZE - PLAYER_HEIGHT;
+    this.menuGame = new Game(this.gameParent, preview, this.controls, {
+      onHud: () => undefined,
+      onAction: () => undefined,
+      getCameraCenterY: () => 0.62,
+    });
+    window.setTimeout(() => this.menuGame?.zoomBy(-0.5), 0);
   }
 
   private updateMenu(): void {
@@ -759,6 +879,8 @@ export class Application {
   }
 
   private start(session: GameSession): void {
+    this.menuGame?.destroy();
+    this.menuGame = null;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     this.session = session;
     this.element("craft-notice").textContent = "";
@@ -780,6 +902,7 @@ export class Application {
     this.element("play-help").hidden = true;
     this.element("toggle-help").setAttribute("aria-expanded", "false");
     this.element("pause-screen").hidden = true;
+    this.element("death-screen").hidden = true;
     this.element("save-state").textContent = "Sauvegarde automatique · 5 s";
     const topHud = [...this.root.querySelectorAll<HTMLElement>('[data-camera-edge="top"]')];
     const bottomHud = [...this.root.querySelectorAll<HTMLElement>('[data-camera-edge="bottom"]')];
@@ -795,8 +918,11 @@ export class Application {
   }
 
   private togglePause(): void {
+    if (this.session?.survival.dead) return;
     if (!this.element("dev-panel").hidden) {
       this.toggleDev(false);
+    } else if (!this.element("chest-panel").hidden) {
+      this.toggleChest(false);
     } else if (!this.element("inventory-panel").hidden) {
       this.toggleInventory(false);
     } else if (this.session && !this.busy) {
@@ -810,6 +936,7 @@ export class Application {
     const open = force ?? panel.hidden;
     if (open) {
       this.element("dev-panel").hidden = true;
+      this.element("chest-panel").hidden = true;
       this.element("open-dev").setAttribute("aria-expanded", "false");
     }
     panel.hidden = !open;
@@ -817,6 +944,131 @@ export class Application {
     this.element("open-inventory").setAttribute("aria-expanded", String(open));
     if (!open) this.clearTransfer();
     this.updateHud();
+  }
+
+  private toggleChest(force?: boolean): void {
+    if (!this.session || this.paused) return;
+    const panel = this.element("chest-panel");
+    const open = force ?? panel.hidden;
+    if (open) {
+      const chest = this.session.nearbyChest();
+      if (!chest) {
+        this.element("action-message").textContent = "Approchez-vous d'un coffre.";
+        return;
+      }
+      this.openChestPosition = { x: chest.x, y: chest.y };
+      this.chestRenderKey = "";
+      this.element("inventory-panel").hidden = true;
+      this.element("dev-panel").hidden = true;
+      this.chestTransferSource = null;
+    } else {
+      this.openChestPosition = null;
+      this.chestTransferSource = null;
+    }
+    panel.hidden = !open;
+    this.controls.setInventoryOpen(open);
+    this.element("open-chest").setAttribute("aria-expanded", String(open));
+    this.renderChestPanel();
+  }
+
+  private renderChestPanel(): void {
+    if (!this.session || !this.openChestPosition) return;
+    const position = this.openChestPosition;
+    const chest = this.session.chestAt(position.x, position.y);
+    if (!chest) {
+      this.toggleChest(false);
+      return;
+    }
+    const renderKey = JSON.stringify({
+      chest: chest.slots, inventory: this.session.inventory, hotbar: this.session.hotbar,
+    });
+    if (renderKey === this.chestRenderKey) return;
+    this.chestRenderKey = renderKey;
+    this.element("chest-title").textContent = ITEM_LABELS[chest.itemId];
+    this.element("chest-capacity-title").textContent = `Contenu · ${chest.slots.length} emplacements`;
+    const playerInventory = this.element("chest-player-inventory");
+    const playerHotbar = this.element("chest-player-hotbar");
+    const chestSlots = this.element("chest-slots");
+    const inventoryStacks = getStacks(this.session.inventory);
+    playerInventory.replaceChildren(...Array.from({ length: INVENTORY_SLOT_COUNT }, (_, index) => {
+      const stack = inventoryStacks[index];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "inventory-slot";
+      button.dataset.chestPlayerArea = "inventory";
+      button.dataset.chestPlayerIndex = String(index);
+      button.setAttribute("aria-label", stack
+        ? `Inventaire : ${stackDescription(stack)}` : `Inventaire, emplacement ${index + 1} : vide`);
+      if (stack) button.innerHTML = slotContent(stack);
+      return button;
+    }));
+    playerHotbar.replaceChildren(...Array.from({ length: HOTBAR_SLOT_COUNT }, (_, index) => {
+      const stack = this.session?.hotbar[index] ?? null;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "hotbar-stack";
+      button.dataset.chestPlayerArea = "hotbar";
+      button.dataset.chestPlayerIndex = String(index);
+      button.setAttribute("aria-label", `Raccourci ${index + 1} : ${
+        stack ? stackDescription(stack) : "vide"}`);
+      if (stack) button.innerHTML = slotContent(stack);
+      return button;
+    }));
+    chestSlots.replaceChildren(...chest.slots.map((stack, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "inventory-slot";
+      button.dataset.chestSlot = String(index);
+      button.setAttribute("aria-label", stack
+        ? `Coffre, emplacement ${index + 1} : ${stackDescription(stack)}`
+        : `Coffre, emplacement ${index + 1} : vide`);
+      if (stack) button.innerHTML = slotContent(stack);
+      return button;
+    }));
+  }
+
+  private handleChestTransferClick(button: HTMLButtonElement): void {
+    if (!this.session || !this.openChestPosition) return;
+    const playerArea = button.dataset.chestPlayerArea;
+    const playerIndex = Number(button.dataset.chestPlayerIndex);
+    const chestIndex = Number(button.dataset.chestSlot);
+    if (!this.chestTransferSource) {
+      if (playerArea === "inventory" || playerArea === "hotbar") {
+        this.chestTransferSource = {
+          area: "player", location: { area: playerArea, index: playerIndex },
+        };
+      } else if (Number.isInteger(chestIndex)) {
+        this.chestTransferSource = { area: "chest", index: chestIndex };
+      }
+      button.classList.add("transfer-source");
+      return;
+    }
+    const source = this.chestTransferSource;
+    const { x, y } = this.openChestPosition;
+    let result;
+    if (source.area === "player" && Number.isInteger(chestIndex)) {
+      result = this.session.movePlayerStackToChest(source.location, x, y, chestIndex);
+    } else if (source.area === "chest" && (playerArea === "inventory" || playerArea === "hotbar")) {
+      result = this.session.moveChestStackToPlayer(x, y, source.index, {
+        area: playerArea, index: playerIndex,
+      });
+    } else if (source.area === "chest" && Number.isInteger(chestIndex)) {
+      result = this.session.moveChestSlot(x, y, source.index, chestIndex);
+    } else if (source.area === "player" && playerArea === "hotbar" &&
+        source.location.area === "inventory") {
+      result = this.session.moveInventoryToHotbar(source.location.index, playerIndex);
+    } else if (source.area === "player" && playerArea === "inventory" &&
+        source.location.area === "hotbar") {
+      result = this.session.moveHotbarToInventory(source.location.index);
+    } else if (source.area === "player" && playerArea === "hotbar" &&
+        source.location.area === "hotbar") {
+      result = this.session.swapHotbar(source.location.index, playerIndex);
+    } else {
+      result = { ok: false as const, reason: "Choisissez un emplacement de destination dans l'autre stockage." };
+    }
+    this.chestTransferSource = null;
+    this.element("chest-notice").textContent = result.ok ? "Objets transférés." : result.reason;
+    this.renderChestPanel();
   }
 
   private syncDevQuantity(value?: number): void {
@@ -888,6 +1140,13 @@ export class Application {
 
   private setPaused(paused: boolean): void {
     if (!this.session) return;
+    if (this.session.survival.dead) {
+      this.controls.setInventoryOpen(true);
+      this.element("death-screen").hidden = false;
+      this.element("play-ui").inert = true;
+      this.element("respawn-player").focus();
+      return;
+    }
     this.paused = paused;
     this.game?.setPaused(paused);
     this.controls.setMode(paused ? "paused" : "playing");
@@ -900,6 +1159,25 @@ export class Application {
     this.element("play-ui").inert = paused;
     this.element(paused ? "continue-game" : "pause-game").focus();
     this.updateHud();
+  }
+
+  private async returnToMainMenu(): Promise<void> {
+    await this.saveCurrent();
+    this.game?.destroy();
+    this.game = null;
+    this.session = null;
+    this.controls.setMode("menu");
+    this.element("play-ui").hidden = true;
+    this.element("pause-screen").hidden = true;
+    this.element("death-screen").hidden = true;
+    this.element("chest-panel").hidden = true;
+    this.element("dev-panel").hidden = true;
+    this.element("inventory-panel").hidden = true;
+    this.element("main-menu").hidden = false;
+    this.element("new-game-form").hidden = true;
+    this.element("menu-notice").textContent = "Partie sauvegardée.";
+    this.element("resume-game").focus();
+    this.ensureMenuPreview();
   }
 
   private async saveCurrent(): Promise<void> {
@@ -1253,6 +1531,10 @@ export class Application {
     const item = session.selectedItem;
     const stack = session.hotbar[session.selectedSlot];
     const tool = stack && isToolStack(stack) ? stack : null;
+    const consume = this.element("consume-selected");
+    const consumable = item !== null && isConsumableItem(item);
+    consume.hidden = !consumable;
+    if (consumable && item !== null) consume.textContent = `Consommer ${ITEM_LABELS[item]}`;
     const mining = item === null || !isBlockItem(item);
     const plane = session.selectedPlane;
     const rotation = session.selectedRotation;
@@ -1305,6 +1587,15 @@ export class Application {
 
   private updateHud(): void {
     if (!this.session) return;
+    if (this.session.survival.dead) {
+      const deathScreen = this.element("death-screen");
+      if (deathScreen.hidden) {
+        this.controls.setInventoryOpen(true);
+        this.element("play-ui").inert = true;
+        deathScreen.hidden = false;
+        this.element("respawn-player").focus();
+      }
+    }
     const { player, world, inventory, selectedSlot, hotbar } = this.session;
     this.element("open-dev").hidden = !this.session.creativeMode;
     const creative = this.element("creative-mode");
@@ -1314,6 +1605,23 @@ export class Application {
     }
     const lighting = this.element("lighting-quality");
     if (lighting instanceof HTMLSelectElement) lighting.value = this.session.lightingQuality;
+    const bed = this.session.nearbyBed();
+    this.element("bed-actions").hidden = bed === null || this.session.survival.dead;
+    if (bed) {
+      const rest = this.element("rest-at-bed");
+      rest.textContent = this.session.restLabel() === "morning"
+        ? "Se reposer jusqu'au matin" : "Se reposer jusqu'au soir";
+      const selectedBed = this.session.survival.respawnBed;
+      const respawn = this.element("set-bed-respawn");
+      respawn.textContent = selectedBed?.x === bed.x && selectedBed?.y === bed.y
+        ? "Point de réapparition défini"
+        : "Définir comme point de réapparition";
+    }
+    const nearbyChest = this.session.nearbyChest();
+    this.element("chest-open-actions").hidden = nearbyChest === null || this.session.survival.dead;
+    if (nearbyChest) {
+      this.element("open-chest").textContent = `Ouvrir ${ITEM_LABELS[nearbyChest.itemId].toLowerCase()}`;
+    }
     const difficulty = this.element("game-difficulty");
     if (difficulty instanceof HTMLSelectElement) difficulty.value = this.session.difficulty;
     this.element("game-difficulty-help").textContent = DIFFICULTIES[this.session.difficulty].description;
@@ -1380,6 +1688,7 @@ export class Application {
       button.title = stack ? stackDescription(stack) : "Vide";
     }
     this.updateConstructionControls();
+    if (!this.element("chest-panel").hidden) this.renderChestPanel();
     this.highlightTransferSource();
     this.updateCraftHud();
   }

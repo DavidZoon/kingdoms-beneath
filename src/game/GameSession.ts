@@ -16,17 +16,21 @@ import {
   type ConstructionPlane, type Inventory, type ItemId, type Rotation, type StationId,
 } from "../world/blocks";
 import { cellKey, WorldModel } from "../world/WorldModel";
-import { isPlantItem, type PlantItemId } from "../world/resources";
+import {
+  CONSUMABLE_HEALING, isConsumableItem, isPlantItem, type PlantItemId,
+} from "../world/resources";
 import type { LightingQuality } from "../lighting/quality";
 import { DIFFICULTIES, isDifficultyId, type DifficultyId } from "../survival/Difficulty";
 import {
   PLAYER_MAX_HEALTH, RESPAWN_INVULNERABILITY_TICKS, RESPAWN_TICKS, type SurvivalState,
 } from "../survival/SurvivalState";
 import {
-  ZOMBIE_HEIGHT, ZOMBIE_WIDTH, separateZombies, spawnZombie, stepZombie, zombieOverlapsTile,
+  ZOMBIE_DIG_COOLDOWN, ZOMBIE_HEIGHT, ZOMBIE_WIDTH, separateZombies, spawnZombie, stepZombie,
+  zombieMiningTarget, zombieOverlapsTile,
   type NightWaveState, type ZombieState,
 } from "../entities/Zombie";
 import { DAY_LENGTH_TICKS, dayPhaseAt } from "../lighting/WorldClock";
+import { CHEST_CAPACITY, chestItemForBlock, type ChestState } from "../inventory/Chest";
 
 export const MAX_STACK = ITEM_CAPACITY;
 export const MAX_EDITS = 100_000;
@@ -34,6 +38,48 @@ export const MAX_GROUND_DROPS = 10_000;
 const PICKUP_RANGE = 24;
 const STATION_RANGE = 4 * TILE_SIZE;
 const damageKey = (x: number, y: number, plane: ConstructionPlane): string => `${plane}:${cellKey(x, y)}`;
+
+function storeNewItems(
+  inventory: Inventory,
+  hotbar: Array<ItemStack | null>,
+  itemId: ItemId,
+  quantity: number,
+  durability?: number,
+): number {
+  let stored = 0;
+  let remaining = quantity;
+  if (isToolItem(itemId)) {
+    const value = durability ?? TOOLS[itemId].maxDurability;
+    for (let index = 0; index < hotbar.length && remaining > 0; index++) {
+      if (hotbar[index] !== null) continue;
+      hotbar[index] = { itemId, quantity: 1, durability: value };
+      stored++;
+      remaining--;
+    }
+    if (remaining > 0) {
+      const added = addItems(inventory, itemId, remaining, [], value);
+      stored += added;
+    }
+    return stored;
+  }
+  for (const stack of hotbar) {
+    if (remaining === 0) break;
+    if (!stack || isToolStack(stack) || stack.itemId !== itemId) continue;
+    const added = Math.min(remaining, STACK_SIZE - stack.quantity);
+    stack.quantity += added;
+    stored += added;
+    remaining -= added;
+  }
+  for (let index = 0; index < hotbar.length && remaining > 0; index++) {
+    if (hotbar[index] !== null) continue;
+    const added = Math.min(remaining, STACK_SIZE);
+    hotbar[index] = { itemId, quantity: added };
+    stored += added;
+    remaining -= added;
+  }
+  return stored + addItems(inventory, itemId, remaining);
+}
+
 export type ActionResult = { ok: true } | { ok: false; reason: string };
 export type MiningResult =
   | { ok: true; destroyed: boolean; toolBroken?: boolean }
@@ -70,6 +116,7 @@ export class GameSession {
   readonly survival: SurvivalState;
   readonly zombies: ZombieState[];
   readonly nightWave: NightWaveState;
+  readonly chests: ChestState[];
   private readonly header: SaveGame;
   private readonly damage = new Map<string, BlockDamage>();
   private creative: boolean;
@@ -90,19 +137,27 @@ export class GameSession {
     this.tick = save.tick;
     this.lightingQuality = save.lightingQuality;
     this.difficulty = save.difficulty;
-    this.survival = { ...save.survival, spawnPoint: { ...save.survival.spawnPoint } };
+    this.survival = {
+      ...save.survival,
+      spawnPoint: { ...save.survival.spawnPoint },
+      initialSpawnPoint: { ...save.survival.initialSpawnPoint },
+      respawnBed: save.survival.respawnBed ? { ...save.survival.respawnBed } : null,
+    };
     this.zombies = save.zombies.map((zombie) => ({ ...zombie }));
     this.nightWave = { ...save.nightWave };
+    this.chests = save.chests.map((chest) => ({
+      ...chest, slots: chest.slots.map((stack) => stack ? { ...stack } : null),
+    }));
     this.creative = save.creativeMode;
     for (const entry of save.blockDamage) this.damage.set(damageKey(entry.x, entry.y, entry.plane), { ...entry });
   }
 
   static create(name: string, seed: string, now = Date.now()): GameSession {
-    const world = new WorldModel(seed, [], 6);
+    const world = new WorldModel(seed, [], 8);
     return new GameSession({
       format: "kingdoms-beneath",
-      schemaVersion: 13,
-      generatorVersion: 6,
+      schemaVersion: 18,
+      generatorVersion: 8,
       id: crypto.randomUUID(),
       name,
       seed,
@@ -135,9 +190,15 @@ export class GameSession {
           x: 8 * TILE_SIZE,
           y: world.generator.surfaceAt(8) * TILE_SIZE - PLAYER_HEIGHT,
         },
+        initialSpawnPoint: {
+          x: 8 * TILE_SIZE,
+          y: world.generator.surfaceAt(8) * TILE_SIZE - PLAYER_HEIGHT,
+        },
+        respawnBed: null,
       },
       zombies: [],
       nightWave: { lastStartedDay: -1, pending: 0, nextSpawnTick: 0 },
+      chests: [],
       edits: [],
       backgroundEdits: [],
       groundDrops: [],
@@ -292,6 +353,20 @@ export class GameSession {
     );
   }
 
+  consumeSelected(): ActionResult & { healed?: number } {
+    const stack = this.hotbar[this.selectedSlot];
+    if (!stack || isToolStack(stack) || !isConsumableItem(stack.itemId)) {
+      return { ok: false, reason: "Sélectionnez un fruit ou un poisson à consommer." };
+    }
+    if (this.survival.dead) return { ok: false, reason: "Impossible de consommer pendant la mort." };
+    const healed = Math.min(CONSUMABLE_HEALING[stack.itemId], PLAYER_MAX_HEALTH - this.survival.health);
+    if (healed === 0) return { ok: false, reason: "Votre santé est déjà au maximum." };
+    this.survival.health += healed;
+    stack.quantity--;
+    if (stack.quantity === 0) this.hotbar[this.selectedSlot] = null;
+    return { ok: true, healed };
+  }
+
   setCreativeMode(enabled: boolean): void {
     this.creative = enabled;
   }
@@ -312,7 +387,7 @@ export class GameSession {
     if (!isItemId(itemId) || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > ITEM_CAPACITY) {
       return { ok: false, reason: `Choisissez une ressource et une quantité entière entre 1 et ${ITEM_CAPACITY}.` };
     }
-    const added = addItems(this.inventory, itemId, quantity);
+    const added = storeNewItems(this.inventory, this.hotbar, itemId, quantity);
     if (added === 0) return { ok: false, reason: "Inventaire plein : libérez un emplacement ou une pile." };
     return { ok: true, added };
   }
@@ -370,7 +445,9 @@ export class GameSession {
         if (stack.quantity === 0) hotbar[index] = null;
       }
     }
-    if (availableItemSpace(next, recipe.output, hotbar) < quantity) {
+    const outputInventory = cloneInventory(next);
+    const outputHotbar = hotbar.map((stack) => stack ? { ...stack } : null);
+    if (storeNewItems(outputInventory, outputHotbar, recipe.output, quantity) < quantity) {
       return {
         ok: false,
         reason: "Rangement plein : libérez assez de place dans l'inventaire ou les piles des raccourcis pour toute la fabrication.",
@@ -384,8 +461,10 @@ export class GameSession {
 
   get craftingBlocked(): boolean {
     const job = this.crafting;
-    return !!job && job.progressTicks === RECIPES[job.recipeId].ticksPerItem &&
-      availableItemSpace(this.inventory, RECIPES[job.recipeId].output, this.hotbar) === 0;
+    if (!job || job.progressTicks !== RECIPES[job.recipeId].ticksPerItem) return false;
+    const inventory = cloneInventory(this.inventory);
+    const hotbar = this.hotbar.map((stack) => stack ? { ...stack } : null);
+    return storeNewItems(inventory, hotbar, RECIPES[job.recipeId].output, 1) === 0;
   }
 
   cancelCraft(): ActionResult {
@@ -416,7 +495,7 @@ export class GameSession {
     const recipe = RECIPES[job.recipeId];
     job.progressTicks = Math.min(job.progressTicks + 1, recipe.ticksPerItem);
     if (job.progressTicks < recipe.ticksPerItem ||
-        addItems(this.inventory, recipe.output, 1, this.hotbar) !== 1) return;
+        storeNewItems(this.inventory, this.hotbar, recipe.output, 1) !== 1) return;
     job.completed++;
     job.progressTicks = 0;
     if (job.completed === job.quantity) this.crafting = null;
@@ -504,7 +583,74 @@ export class GameSession {
     return this.survival.dead;
   }
 
+  respawnNow(): ActionResult {
+    if (!this.survival.dead) return { ok: false, reason: "Le joueur est toujours vivant." };
+    const day = Math.floor(this.tick / DAY_LENGTH_TICKS);
+    let morning = day * DAY_LENGTH_TICKS + Math.ceil(DAY_LENGTH_TICKS * 5 / 6);
+    if (morning <= this.tick) morning += DAY_LENGTH_TICKS;
+    this.tick = morning;
+    this.zombies.splice(0);
+    this.nightWave.pending = 0;
+    this.respawn();
+    return { ok: true };
+  }
+
+  private damageSpike(x: number, y: number): void {
+    const block = this.world.getBlock(x, y);
+    const trapDamage = block === Block.WoodSpikes ? 2 : block === Block.IronSpikes ? 5 : 0;
+    if (trapDamage === 0) return;
+    const key = damageKey(x, y, "foreground");
+    const durability = BLOCKS[block].durability;
+    if (durability === null) return;
+    const nextDamage = this.getBlockDamage(x, y) + 1;
+    if (nextDamage >= durability) {
+      this.damage.delete(key);
+      this.world.setBlock(x, y, Block.Air, 0, true);
+    } else {
+      this.damage.set(key, { x, y, damage: nextDamage, plane: "foreground" });
+    }
+  }
+
+  private overlappingSpike(
+    x: number, y: number, width: number, height: number,
+  ): { x: number; y: number; damage: number } | null {
+    const left = Math.floor(x / TILE_SIZE);
+    const right = Math.floor((x + width - 0.001) / TILE_SIZE);
+    const top = Math.floor(y / TILE_SIZE);
+    const bottom = Math.floor((y + height - 0.001) / TILE_SIZE);
+    for (let tileY = Math.max(0, top); tileY <= bottom; tileY++) {
+      for (let tileX = left; tileX <= right; tileX++) {
+        const block = this.world.getBlock(tileX, tileY);
+        if (block === Block.WoodSpikes) return { x: tileX, y: tileY, damage: 2 };
+        if (block === Block.IronSpikes) return { x: tileX, y: tileY, damage: 5 };
+      }
+    }
+    return null;
+  }
+
+  private advanceSpikes(): void {
+    if (this.tick % 60 !== 0) return;
+    const playerSpike = this.overlappingSpike(this.player.x, this.player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+    if (playerSpike) {
+      if (this.takeDamage(playerSpike.damage)) this.damageSpike(playerSpike.x, playerSpike.y);
+    }
+    for (let index = this.zombies.length - 1; index >= 0; index--) {
+      const zombie = this.zombies[index];
+      const spike = this.overlappingSpike(zombie.x, zombie.y, ZOMBIE_WIDTH, ZOMBIE_HEIGHT);
+      if (!spike) continue;
+      zombie.health = Math.max(0, zombie.health - spike.damage);
+      this.damageSpike(spike.x, spike.y);
+      if (zombie.health === 0) this.zombies.splice(index, 1);
+    }
+  }
+
   private respawn(): void {
+    const bedStillExists = this.survival.respawnBed &&
+      this.world.getBlock(this.survival.respawnBed.x, this.survival.respawnBed.y) === Block.Bed;
+    if (!bedStillExists) {
+      this.survival.spawnPoint = { ...this.survival.initialSpawnPoint };
+      this.survival.respawnBed = null;
+    }
     const { x, y } = this.survival.spawnPoint;
     let spawnX = x;
     let spawnY = y;
@@ -576,12 +722,79 @@ export class GameSession {
   }
 
   private advanceEnemies(): void {
+    this.activateCaveMonsters();
     let damage = 0;
     for (const zombie of this.zombies) {
       damage = Math.max(damage, stepZombie(this.world, zombie, this.player, DIFFICULTIES[this.difficulty]).damage);
+      const target = zombieMiningTarget(this.world, zombie, this.player);
+      if (target && zombie.digCooldown === 0 && this.zombieMineBlock(target.x, target.y)) {
+        zombie.digCooldown = ZOMBIE_DIG_COOLDOWN;
+      }
     }
     separateZombies(this.world, this.zombies);
     if (damage > 0) this.takeDamage(damage);
+  }
+
+  private activateCaveMonsters(): void {
+    if (this.tick % 30 !== 0 ||
+        this.zombies.length >= DIFFICULTIES[this.difficulty].maxActiveZombies) return;
+    const centerX = Math.floor((this.player.x + PLAYER_WIDTH / 2) / TILE_SIZE);
+    const centerY = Math.floor((this.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    for (let y = centerY - 12; y <= centerY + 12; y++) {
+      for (let x = centerX - 12; x <= centerX + 12; x++) {
+        if (!this.world.generator.caveMonsterAt(x, y)) continue;
+        const marker = `cave-monster:${x},${y}`;
+        if (this.collectedNaturalPickups.has(marker) || this.world.getBlock(x, y) !== Block.Air) continue;
+        this.collectedNaturalPickups.add(marker);
+        this.zombies.push({
+          id: `cave-monster-${x}-${y}`,
+          x: x * TILE_SIZE + 2,
+          y: y * TILE_SIZE,
+          vx: 0, vy: 0, health: 40, grounded: false, attackCooldown: 0,
+          stunTicks: 0, digCooldown: 0,
+        });
+        if (this.zombies.length >= DIFFICULTIES[this.difficulty].maxActiveZombies) return;
+      }
+    }
+  }
+
+  private zombieMineBlock(x: number, y: number): boolean {
+    const block = this.world.getBlock(x, y);
+    const durability = BLOCKS[block].durability;
+    if (durability === null || durability <= 0 || block === Block.Bedrock) return false;
+    const key = damageKey(x, y, "foreground");
+    const damage = this.getBlockDamage(x, y) + 1;
+    if (damage < durability) {
+      if (!this.damage.has(key) && this.damage.size >= MAX_EDITS) return false;
+      this.damage.set(key, { x, y, damage, plane: "foreground" });
+      return true;
+    }
+    if (this.world.editCount >= MAX_EDITS && this.world.wouldAddEdit(x, y, Block.Air, 0, "foreground")) {
+      return false;
+    }
+    const drop = BLOCKS[block].drop;
+    const chest = this.chestAt(x, y);
+    const chestDrops = chest ? chest.slots.filter((stack): stack is ItemStack => stack !== null) : [];
+    if (this.groundDrops.length + (drop ? 1 : 0) + chestDrops.length > MAX_GROUND_DROPS) return false;
+    this.world.setBlock(x, y, Block.Air, 0, true);
+    this.damage.delete(key);
+    if (drop) {
+      this.groundDrops.push({
+        id: crypto.randomUUID(), x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE,
+        itemId: drop, quantity: 1,
+      });
+    }
+    for (const stack of chestDrops) {
+      this.groundDrops.push({
+        id: crypto.randomUUID(), x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE,
+        ...stack,
+      });
+    }
+    if (chest) {
+      const chestIndex = this.chests.indexOf(chest);
+      if (chestIndex >= 0) this.chests.splice(chestIndex, 1);
+    }
+    return true;
   }
 
   getZombieTarget(x: number, y: number): ZombieState | null {
@@ -648,6 +861,7 @@ export class GameSession {
       .sort((a, b) => a.distance - b.distance)[0]?.zombie;
     if (!target) return { ok: true, hit: false, killed: false, damage };
     target.health = Math.max(0, target.health - damage);
+    target.stunTicks = Math.max(target.stunTicks, equipment?.kind === "weapon" ? equipment.stunTicks : 0);
     const killed = target.health === 0;
     if (killed) {
       const index = this.zombies.indexOf(target);
@@ -667,8 +881,6 @@ export class GameSession {
     this.attackCooldown = Math.max(0, this.attackCooldown - 1);
     if (this.survival.invulnerabilityTicks > 0) this.survival.invulnerabilityTicks--;
     if (this.survival.dead) {
-      this.survival.respawnTicks = Math.max(0, this.survival.respawnTicks - 1);
-      if (this.survival.respawnTicks === 0) this.respawn();
       this.tick++;
       return;
     }
@@ -677,6 +889,7 @@ export class GameSession {
     this.pickupNearby();
     this.advanceCraft();
     this.advanceNight();
+    this.advanceSpikes();
     this.advanceEnemies();
     this.tick++;
   }
@@ -687,7 +900,7 @@ export class GameSession {
     for (let index = this.groundDrops.length - 1; index >= 0; index--) {
       const drop = this.groundDrops[index];
       if (Math.hypot(centerX - drop.x, centerY - drop.y) > PICKUP_RANGE) continue;
-      const collected = addItems(this.inventory, drop.itemId, drop.quantity, this.hotbar, drop.durability);
+      const collected = storeNewItems(this.inventory, this.hotbar, drop.itemId, drop.quantity, drop.durability);
       if (collected === drop.quantity) this.groundDrops.splice(index, 1);
       else if (!isToolStack(drop)) drop.quantity -= collected;
     }
@@ -697,7 +910,9 @@ export class GameSession {
     )) {
       if (Math.hypot(centerX - drop.x, centerY - drop.y) > PICKUP_RANGE ||
           this.collectedNaturalPickups.size >= MAX_EDITS) continue;
-      if (addItems(this.inventory, drop.itemId, 1, this.hotbar) === 1) this.collectedNaturalPickups.add(drop.id);
+      if (storeNewItems(this.inventory, this.hotbar, drop.itemId, 1) === 1) {
+        this.collectedNaturalPickups.add(drop.id);
+      }
     }
   }
 
@@ -764,9 +979,216 @@ export class GameSession {
       ) <= 5 * TILE_SIZE;
   }
 
+  nearbyBed(): { x: number; y: number } | null {
+    const centerX = Math.floor((this.player.x + PLAYER_WIDTH / 2) / TILE_SIZE);
+    const centerY = Math.floor((this.player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    let nearest: { x: number; y: number; distance: number } | null = null;
+    for (let y = centerY - 2; y <= centerY + 2; y++) {
+      for (let x = centerX - 2; x <= centerX + 2; x++) {
+        if (this.world.getBlock(x, y) !== Block.Bed) continue;
+        const distance = Math.hypot(
+          (x + 0.5) * TILE_SIZE - (this.player.x + PLAYER_WIDTH / 2),
+          (y + 0.5) * TILE_SIZE - (this.player.y + PLAYER_HEIGHT / 2),
+        );
+        if (distance <= 3 * TILE_SIZE && (!nearest || distance < nearest.distance)) {
+          nearest = { x, y, distance };
+        }
+      }
+    }
+    return nearest ? { x: nearest.x, y: nearest.y } : null;
+  }
+
+  chestAt(x: number, y: number): ChestState | null {
+    const existing = this.chests.find((chest) => chest.x === x && chest.y === y);
+    if (existing) return existing;
+    const generated = this.world.generator.caveChestAt(x, y);
+    if (!generated || this.world.getBlock(x, y) === Block.Air) return null;
+    const chest: ChestState = {
+      x, y, itemId: generated,
+      slots: Array.from({ length: CHEST_CAPACITY[generated] }, () => null),
+    };
+    this.fillGeneratedChest(chest);
+    this.chests.push(chest);
+    return chest;
+  }
+
+  nearbyChest(): ChestState | null {
+    const centerX = this.player.x + PLAYER_WIDTH / 2;
+    const centerY = this.player.y + PLAYER_HEIGHT / 2;
+    let nearest: { chest: ChestState; distance: number } | null = null;
+    const startX = Math.floor(centerX / TILE_SIZE) - 3;
+    const startY = Math.floor(centerY / TILE_SIZE) - 3;
+    for (let y = startY; y <= startY + 6; y++) {
+      for (let x = startX; x <= startX + 6; x++) this.chestAt(x, y);
+    }
+    for (const chest of this.chests) {
+      if (this.world.getBlock(chest.x, chest.y) !== (
+        chest.itemId === "smallChest" ? Block.SmallChest :
+          chest.itemId === "mediumChest" ? Block.MediumChest : Block.LargeChest
+      )) continue;
+      const distance = Math.hypot(
+        (chest.x + 0.5) * TILE_SIZE - centerX,
+        (chest.y + 0.5) * TILE_SIZE - centerY,
+      );
+      if (distance <= 3 * TILE_SIZE && (!nearest || distance < nearest.distance)) {
+        nearest = { chest, distance };
+      }
+    }
+    return nearest?.chest ?? null;
+  }
+
+  private fillGeneratedChest(chest: ChestState): void {
+    const loot: ItemId[] = [
+      "apple", "pear", "peach", "apricot", "fish_raw",
+      "coal", "copper_ore", "iron_ore", "stonePickaxe", "copperPickaxe", "ironPickaxe",
+    ];
+    const count = chest.itemId === "smallChest" ? 4 : chest.itemId === "mediumChest" ? 6 : 9;
+    for (let index = 0; index < count; index++) {
+      const hash = [...`${this.header.seed}:${chest.x}:${chest.y}:${index}`].reduce(
+        (value, character) => Math.imul(value ^ character.charCodeAt(0), 16777619), 2166136261,
+      ) >>> 0;
+      const itemId = loot[hash % loot.length];
+      const slot = (hash >>> 8) % chest.slots.length;
+      const quantity = isToolItem(itemId) ? 1 : 1 + (hash >>> 16) % 4;
+      chest.slots[slot] = isToolItem(itemId)
+        ? { itemId, quantity: 1, durability: TOOLS[itemId].maxDurability }
+        : { itemId, quantity };
+    }
+  }
+
+  movePlayerStackToChest(source: SlotLocation, chestX: number, chestY: number, chestIndex: number): ActionResult {
+    const chest = this.chestAt(chestX, chestY);
+    if (!chest || !Number.isInteger(chestIndex) || chestIndex < 0 ||
+        chestIndex >= chest.slots.length) return { ok: false, reason: "Coffre ou emplacement cible invalide." };
+    const target = chest.slots[chestIndex];
+    const playerStack = source.area === "inventory"
+      ? getStacks(this.inventory)[source.index] : this.hotbar[source.index];
+    if (!playerStack) return { ok: false, reason: "Cet emplacement de joueur est vide." };
+    if (target && (isToolStack(target) || isToolStack(playerStack) || target.itemId !== playerStack.itemId)) {
+      return { ok: false, reason: "Cet emplacement de coffre ne peut pas recevoir cette pile." };
+    }
+    const amount = target
+      ? Math.min(playerStack.quantity, STACK_SIZE - target.quantity)
+      : playerStack.quantity;
+    if (amount <= 0) return { ok: false, reason: "La pile du coffre est déjà pleine." };
+    const nextInventory = cloneInventory(this.inventory);
+    const nextHotbar = this.hotbar.map((stack) => stack ? { ...stack } : null);
+    if (source.area === "inventory") removeInventoryStack(nextInventory, source.index, amount);
+    else if (isToolStack(playerStack)) nextHotbar[source.index] = null;
+    else {
+      const stack = nextHotbar[source.index];
+      if (!stack) return { ok: false, reason: "Pile du raccourci introuvable." };
+      stack.quantity -= amount;
+      if (stack.quantity === 0) nextHotbar[source.index] = null;
+    }
+    const next = target && !isToolStack(target)
+      ? { ...target, quantity: target.quantity + amount }
+      : { ...playerStack, quantity: amount } as ItemStack;
+    Object.assign(this.inventory, nextInventory);
+    this.hotbar.splice(0, this.hotbar.length, ...nextHotbar);
+    chest.slots[chestIndex] = next;
+    return { ok: true };
+  }
+
+  moveChestStackToPlayer(
+    chestX: number, chestY: number, chestIndex: number, destination: SlotLocation,
+  ): ActionResult {
+    const chest = this.chestAt(chestX, chestY);
+    const stack = chest?.slots[chestIndex];
+    if (!chest || !stack) return { ok: false, reason: "Cet emplacement de coffre est vide." };
+    const nextChestSlots = [...chest.slots];
+    const nextInventory = cloneInventory(this.inventory);
+    const nextHotbar = this.hotbar.map((entry) => entry ? { ...entry } : null);
+    let moved = 0;
+    if (destination.area === "hotbar") {
+      if (!Number.isInteger(destination.index) || destination.index < 0 ||
+          destination.index >= HOTBAR_SLOT_COUNT) return { ok: false, reason: "Raccourci cible invalide." };
+      const target = nextHotbar[destination.index];
+      if (!target) {
+        nextHotbar[destination.index] = { ...stack };
+        moved = stack.quantity;
+      } else if (!isToolStack(target) && !isToolStack(stack) && target.itemId === stack.itemId) {
+        moved = Math.min(stack.quantity, STACK_SIZE - target.quantity);
+        target.quantity += moved;
+      } else {
+        return { ok: false, reason: "Le raccourci cible est incompatible." };
+      }
+    } else {
+      moved = addItems(nextInventory, stack.itemId, stack.quantity, [], stack.durability);
+    }
+    if (moved === 0) return { ok: false, reason: "Inventaire plein : libérez un emplacement." };
+    if (moved === stack.quantity) nextChestSlots[chestIndex] = null;
+    else nextChestSlots[chestIndex] = {
+      ...stack, quantity: stack.quantity - moved,
+    } as ItemStack;
+    chest.slots.splice(0, chest.slots.length, ...nextChestSlots);
+    Object.assign(this.inventory, nextInventory);
+    this.hotbar.splice(0, this.hotbar.length, ...nextHotbar);
+    return { ok: true };
+  }
+
+  moveChestSlot(chestX: number, chestY: number, from: number, to: number): ActionResult {
+    const chest = this.chestAt(chestX, chestY);
+    if (!chest || from < 0 || to < 0 || from >= chest.slots.length || to >= chest.slots.length) {
+      return { ok: false, reason: "Emplacements de coffre invalides." };
+    }
+    const source = chest.slots[from];
+    const target = chest.slots[to];
+    if (!source) return { ok: false, reason: "Cet emplacement de coffre est vide." };
+    if (!target) {
+      [chest.slots[from], chest.slots[to]] = [null, source];
+      return { ok: true };
+    }
+    if (!isToolStack(source) && !isToolStack(target) && source.itemId === target.itemId) {
+      const moved = Math.min(source.quantity, STACK_SIZE - target.quantity);
+      target.quantity += moved;
+      source.quantity -= moved;
+      if (source.quantity === 0) chest.slots[from] = null;
+      return { ok: true };
+    }
+    [chest.slots[from], chest.slots[to]] = [target, source];
+    return { ok: true };
+  }
+
+  restLabel(): "morning" | "evening" {
+    return dayPhaseAt(this.tick) === "Jour" || dayPhaseAt(this.tick) === "Aube" ? "evening" : "morning";
+  }
+
+  setRespawnAtNearbyBed(): ActionResult {
+    const bed = this.nearbyBed();
+    if (!bed) return { ok: false, reason: "Approchez-vous d'un lit pour définir le point de réapparition." };
+    this.survival.spawnPoint = {
+      x: (bed.x + 0.5) * TILE_SIZE - PLAYER_WIDTH / 2,
+      y: bed.y * TILE_SIZE - PLAYER_HEIGHT,
+    };
+    this.survival.respawnBed = { ...bed };
+    return { ok: true };
+  }
+
+  restAtNearbyBed(): ActionResult & { target?: "morning" | "evening" } {
+    if (!this.nearbyBed()) return { ok: false, reason: "Approchez-vous d'un lit pour vous reposer." };
+    if (this.survival.dead) return { ok: false, reason: "Impossible de se reposer pendant la réapparition." };
+    const target = this.restLabel();
+    const day = Math.floor(this.tick / DAY_LENGTH_TICKS);
+    const targetProgress = target === "morning" ? 5 / 6 : 1 / 3;
+    let next = day * DAY_LENGTH_TICKS + Math.ceil(DAY_LENGTH_TICKS * targetProgress);
+    if (next <= this.tick) next += DAY_LENGTH_TICKS;
+    this.tick = next;
+    if (target === "morning") {
+      this.zombies.splice(0);
+      this.nightWave.pending = 0;
+    }
+    return { ok: true, target };
+  }
+
   private get miningPower(): number {
     const stack = this.hotbar[this.selectedSlot];
     return stack && isToolStack(stack) ? TOOLS[stack.itemId].miningPower : 1;
+  }
+
+  private get harvestPower(): number {
+    const stack = this.hotbar[this.selectedSlot];
+    return stack && isToolStack(stack) ? TOOLS[stack.itemId].harvestDamage : 1;
   }
 
   plantsAt(x: number, y: number): NaturalPlant[] {
@@ -803,13 +1225,14 @@ export class GameSession {
         this.groundDrops.length >= MAX_GROUND_DROPS) {
       return { ok: false, reason: "Inventaire et espace de dépôt pleins." };
     }
-    if (addItems(this.inventory, plant.itemId, 1, this.hotbar) === 0) {
+    if (storeNewItems(this.inventory, this.hotbar, plant.itemId, 1) === 0) {
       this.groundDrops.push({
         id: crypto.randomUUID(), x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE,
         itemId: plant.itemId, quantity: 1,
       });
     }
     this.collectedPlants.add(plant.id);
+    this.finishMiningHit(true);
     return { ok: true };
   }
 
@@ -875,7 +1298,14 @@ export class GameSession {
     }
   }
 
-  mine(targetX: number, targetY: number, power = this.miningPower): MiningResult {
+  mine(targetX: number, targetY: number, requestedPower?: number): MiningResult {
+    const preliminary = this.getMiningTarget(targetX, targetY);
+    const preliminaryBlock = preliminary ? this.world.getBlockOnPlane(preliminary.x, preliminary.y, preliminary.plane) : null;
+    const harvestBlock = preliminaryBlock !== null && [
+      Block.PineLog, Block.OakLog, Block.BirchLog, Block.JungleLog, Block.DeadwoodLog,
+      Block.Leaves, Block.Branch, Block.OakLeaf, Block.PineNeedle,
+    ].some((item) => item === preliminaryBlock);
+    const power = requestedPower ?? (harvestBlock ? this.harvestPower : this.miningPower);
     if (!Number.isSafeInteger(power) || power <= 0) {
       return { ok: false, reason: "Puissance de minage invalide." };
     }
@@ -901,6 +1331,8 @@ export class GameSession {
       return this.finishMiningHit(false);
     }
     const drop = BLOCKS[block].drop;
+    const chest = plane === "foreground" ? this.chestAt(x, y) : null;
+    const chestDrops = chest ? chest.slots.filter((stack): stack is ItemStack => stack !== null) : [];
     const harvests = this.world.naturalHarvestAt(x, y, plane).filter((item) => !isPlantItem(item));
     const rewards = [...(drop ? [drop] : []), ...harvests];
     if (this.world.editCount >= MAX_EDITS && this.world.wouldAddEdit(x, y, Block.Air, 0, plane)) {
@@ -908,17 +1340,14 @@ export class GameSession {
     }
     const nextInventory = cloneInventory(this.inventory);
     const nextHotbar = this.hotbar.map((stack) => stack ? { ...stack } : null);
-    const overflow = rewards.filter((item) => addItems(nextInventory, item, 1, nextHotbar) === 0);
-    if (this.groundDrops.length + overflow.length > MAX_GROUND_DROPS) {
+    const overflow = rewards.filter((item) => storeNewItems(nextInventory, nextHotbar, item, 1) === 0);
+    if (this.groundDrops.length + overflow.length + chestDrops.length > MAX_GROUND_DROPS) {
       return { ok: false, reason: "Inventaire et espace de dépôt pleins." };
     }
     this.world.setBlockOnPlane(x, y, Block.Air, 0, plane);
     this.damage.delete(key);
     Object.assign(this.inventory, nextInventory);
-    this.hotbar.forEach((stack, index) => {
-      const next = nextHotbar[index];
-      if (stack && next) stack.quantity = next.quantity;
-    });
+    this.hotbar.splice(0, this.hotbar.length, ...nextHotbar);
     for (const item of overflow) {
       this.groundDrops.push({
         id: crypto.randomUUID(),
@@ -927,6 +1356,18 @@ export class GameSession {
         itemId: item,
         quantity: 1,
       });
+    }
+    for (const stack of chestDrops) {
+      this.groundDrops.push({
+        id: crypto.randomUUID(),
+        x: (x + 0.5) * TILE_SIZE,
+        y: (y + 0.5) * TILE_SIZE,
+        ...stack,
+      });
+    }
+    if (chest) {
+      const index = this.chests.indexOf(chest);
+      if (index >= 0) this.chests.splice(index, 1);
     }
     return this.finishMiningHit(true);
   }
@@ -962,6 +1403,13 @@ export class GameSession {
     }
     this.world.setBlockOnPlane(x, y, block, this.selectedRotation, plane, true);
     this.damage.delete(damageKey(x, y, plane));
+    const chestItem = chestItemForBlock(block);
+    if (chestItem) {
+      this.chests.push({
+        x, y, itemId: chestItem,
+        slots: Array.from({ length: CHEST_CAPACITY[chestItem] }, () => null),
+      });
+    }
     stack.quantity--;
     if (stack.quantity === 0) this.hotbar[this.selectedSlot] = null;
     return { ok: true };
@@ -979,9 +1427,17 @@ export class GameSession {
       selectedSlot: this.selectedSlot,
       crafting: this.crafting ? { ...this.crafting } : null,
       difficulty: this.difficulty,
-      survival: { ...this.survival, spawnPoint: { ...this.survival.spawnPoint } },
+      survival: {
+        ...this.survival,
+        spawnPoint: { ...this.survival.spawnPoint },
+        initialSpawnPoint: { ...this.survival.initialSpawnPoint },
+        respawnBed: this.survival.respawnBed ? { ...this.survival.respawnBed } : null,
+      },
       zombies: this.zombies.map((zombie) => ({ ...zombie })),
       nightWave: { ...this.nightWave },
+      chests: this.chests.map((chest) => ({
+        ...chest, slots: chest.slots.map((stack) => stack ? { ...stack } : null),
+      })),
       edits: this.world.edits,
       backgroundEdits: this.world.backgroundEdits,
       groundDrops: this.groundDrops.map((drop) => ({ ...drop })),

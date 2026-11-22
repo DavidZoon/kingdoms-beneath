@@ -54,6 +54,10 @@ export const RESOURCES = {
   pearl: { label: "Perle", planes: ["foreground"], isBlock: false, color: "#F4F1EA", solid: false, durability: 0, opacity: false },
   resin: { label: "Résine", planes: ["foreground"], isBlock: false, color: "#D99A2B", solid: false, durability: 0, opacity: false },
   sap: { label: "Sève", planes: ["foreground"], isBlock: false, color: "#CFAE4A", solid: false, durability: 0, opacity: false },
+  apple: { label: "Pomme", planes: ["foreground"], isBlock: false, color: "#D74B42", solid: false, durability: 0, opacity: false },
+  pear: { label: "Poire", planes: ["foreground"], isBlock: false, color: "#B8C95A", solid: false, durability: 0, opacity: false },
+  peach: { label: "Pêche", planes: ["foreground"], isBlock: false, color: "#F18B68", solid: false, durability: 0, opacity: false },
+  apricot: { label: "Abricot", planes: ["foreground"], isBlock: false, color: "#F2A34C", solid: false, durability: 0, opacity: false },
 } as const;
 
 export type ResourceId = keyof typeof RESOURCES;
@@ -62,6 +66,19 @@ export const PLANT_ITEMS = [
   "wild_berry", "mushroom_brown", "mushroom_red", "herb_mint", "lavender", "aloe", "cactus_flesh",
 ] as const satisfies readonly ResourceId[];
 export type PlantItemId = (typeof PLANT_ITEMS)[number];
+export const FRUIT_ITEMS = ["apple", "pear", "peach", "apricot"] as const satisfies readonly ResourceId[];
+export type FruitItemId = (typeof FRUIT_ITEMS)[number];
+export const CONSUMABLE_HEALING: Record<FruitItemId | "fish_raw", number> = {
+  apple: 12, pear: 14, peach: 18, apricot: 16, fish_raw: 20,
+};
+
+export function isFruitItem(item: ResourceId): item is FruitItemId {
+  return FRUIT_ITEMS.some((fruit) => fruit === item);
+}
+
+export function isConsumableItem(item: string): item is FruitItemId | "fish_raw" {
+  return item === "fish_raw" || FRUIT_ITEMS.some((fruit) => fruit === item);
+}
 
 export function isPlantItem(item: ResourceId): item is PlantItemId {
   return PLANT_ITEMS.some((plant) => plant === item);

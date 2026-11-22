@@ -1,8 +1,9 @@
 import { Block, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
-import { BiomeResources, RESOURCE_RULES, V4_RESOURCE_RULES, isLog, type NaturalPickup } from "./BiomeResources";
+import { BiomeResources, RESOURCE_RULES, V4_RESOURCE_RULES, V7_RESOURCE_RULES, isLog, type NaturalPickup } from "./BiomeResources";
+import { CAVE_FEATURE_ODDS, type CaveFeatureOdds } from "./BiomeResources";
 import type { ResourceId } from "../world/resources";
 
-export type GeneratorVersion = 1 | 2 | 3 | 4 | 5 | 6;
+export type GeneratorVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export class WorldGenerator {
   private readonly seedHash: number;
@@ -15,7 +16,8 @@ export class WorldGenerator {
     }
     this.seedHash = hash;
     this.resources = new BiomeResources(
-      this, (x, y, salt) => this.noise2D(x, y, salt), version >= 5 ? RESOURCE_RULES : V4_RESOURCE_RULES,
+      this, (x, y, salt) => this.noise2D(x, y, salt),
+      version >= 7 ? V7_RESOURCE_RULES : version >= 5 ? RESOURCE_RULES : V4_RESOURCE_RULES,
     );
   }
 
@@ -106,7 +108,14 @@ export class WorldGenerator {
   blockAt(x: number, y: number): BlockId {
     if (this.version >= 4) {
       const block = this.resources.blockAt(x, y);
-      return isLog(block) ? Block.Air : block;
+      if (isLog(block)) return Block.Air;
+      if (this.version >= 8 && block === Block.Air) {
+        const chest = this.caveChestAt(x, y);
+        if (chest === "smallChest") return Block.SmallChest;
+        if (chest === "mediumChest") return Block.MediumChest;
+        if (chest === "largeChest") return Block.LargeChest;
+      }
+      return block;
     }
     const block = this.originalBlockAt(x, y);
     return this.version === 3 && block === Block.PineLog ? Block.Air : block;
@@ -127,6 +136,8 @@ export class WorldGenerator {
     if (this.version < 3 || Math.abs(x) > MAX_TILE_X || y < 0 || y >= WORLD_HEIGHT) return Block.Air;
     if (this.version >= 4 && this.isBackgroundTrunk(x, y)) return this.resources.blockAt(x, y);
     const surface = this.surfaceAt(x);
+    const water = this.waterLevelAt(x);
+    if (this.version >= 7 && water !== null && y >= water && y < surface) return Block.Dirt;
     if (y < surface) return this.isBackgroundTrunk(x, y) ? Block.PineLog : Block.Air;
     if (y === surface) return this.version >= 6 ? Block.Dirt : Block.Air;
     if (this.version >= 6) return y <= surface + 4 ? Block.Dirt : Block.Stone;
@@ -149,6 +160,37 @@ export class WorldGenerator {
 
   pickupsAt(x: number, y: number): readonly NaturalPickup[] {
     return this.version >= 4 ? this.resources.pickupsAt(x, y) : [];
+  }
+
+  caveOddsAt(x: number): CaveFeatureOdds {
+    return CAVE_FEATURE_ODDS[this.biomeAt(x)];
+  }
+
+  caveChestAt(x: number, y: number): "smallChest" | "mediumChest" | "largeChest" | null {
+    if (this.version < 8 || y < this.surfaceAt(x) + 8 || y >= WORLD_HEIGHT - 2 ||
+        this.resources.blockAt(x, y) !== Block.Air) return null;
+    const odds = this.caveOddsAt(x);
+    const roll = this.noise2D(x, y, 701);
+    if (roll < odds.largeChest) return "largeChest";
+    if (roll < odds.largeChest + odds.mediumChest) return "mediumChest";
+    if (roll < odds.largeChest + odds.mediumChest + odds.smallChest) return "smallChest";
+    return null;
+  }
+
+  caveMonsterAt(x: number, y: number): boolean {
+    if (this.version < 8 || y < this.surfaceAt(x) + 8 ||
+        y >= WORLD_HEIGHT - 2 || this.resources.blockAt(x, y) !== Block.Air) return false;
+    const odds = this.caveOddsAt(x);
+    let nearbyChest = false;
+    for (let dy = -6; dy <= 6 && !nearbyChest; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        if (this.caveChestAt(x + dx, y + dy)) {
+          nearbyChest = true;
+          break;
+        }
+      }
+    }
+    return this.noise2D(x, y, 809) < (nearbyChest ? odds.monsterWithChest : odds.monster);
   }
 
   private nearestGeneratedBlock(x: number, y: number, surface: number): BlockId {

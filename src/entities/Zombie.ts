@@ -1,4 +1,4 @@
-import { BLOCKS, TILE_SIZE, WORLD_HEIGHT, MAX_TILE_X } from "../world/blocks";
+import { BLOCKS, isLiquidBlock, TILE_SIZE, WORLD_HEIGHT, MAX_TILE_X } from "../world/blocks";
 import type { WorldModel } from "../world/WorldModel";
 import type { PlayerState } from "../player/PlayerController";
 import type { Difficulty } from "../survival/Difficulty";
@@ -9,6 +9,8 @@ export const ZOMBIE_MAX_HEALTH = 40;
 export const ZOMBIE_SPEED = 34;
 export const ZOMBIE_ATTACK_RANGE = 18;
 export const ZOMBIE_ATTACK_COOLDOWN = 45;
+export const ZOMBIE_DIG_COOLDOWN = 15;
+export const ZOMBIE_DETECTION_RANGE = 5 * TILE_SIZE;
 const GRAVITY = 680;
 const EPSILON = 0.001;
 
@@ -21,6 +23,8 @@ export interface ZombieState {
   health: number;
   grounded: boolean;
   attackCooldown: number;
+  stunTicks: number;
+  digCooldown: number;
 }
 
 export interface NightWaveState {
@@ -47,8 +51,37 @@ function overlapsSolid(world: WorldModel, x: number, y: number): boolean {
     for (let cx = left; cx <= right; cx++) {
       if (BLOCKS[world.getBlock(cx, cy)].solid) return true;
     }
+
   }
   return false;
+}
+
+function liquidAt(world: WorldModel, x: number, y: number): boolean {
+  const left = Math.floor(x / TILE_SIZE);
+  const right = Math.floor((x + ZOMBIE_WIDTH - EPSILON) / TILE_SIZE);
+  const top = Math.floor(y / TILE_SIZE);
+  const bottom = Math.floor((y + ZOMBIE_HEIGHT - EPSILON) / TILE_SIZE);
+  for (let cy = top; cy <= bottom; cy++) {
+    for (let cx = left; cx <= right; cx++) {
+      if (isLiquidBlock(world.getBlock(cx, cy))) return true;
+    }
+  }
+  return false;
+}
+
+function overlappingSolidTop(world: WorldModel, x: number, y: number): number | null {
+  const left = Math.floor(x / TILE_SIZE);
+  const right = Math.floor((x + ZOMBIE_WIDTH - EPSILON) / TILE_SIZE);
+  const top = Math.floor(y / TILE_SIZE);
+  const bottom = Math.floor((y + ZOMBIE_HEIGHT - EPSILON) / TILE_SIZE);
+  let solidTop: number | null = null;
+  for (let cy = Math.max(0, top); cy <= bottom; cy++) {
+    for (let cx = left; cx <= right; cx++) {
+      if (!BLOCKS[world.getBlock(cx, cy)].solid) continue;
+      solidTop = Math.min(solidTop ?? Infinity, cy * TILE_SIZE);
+    }
+  }
+  return solidTop;
 }
 
 export function zombieOverlapsSolid(world: WorldModel, zombie: Pick<ZombieState, "x" | "y">): boolean {
@@ -114,23 +147,32 @@ export function spawnZombie(world: WorldModel, player: PlayerState, direction: -
   if (overlapsSolid(world, x, y) || !BLOCKS[world.getBlock(xTile, surface)].solid) return null;
   return {
     id, x, y, vx: 0, vy: 0, health: ZOMBIE_MAX_HEALTH, grounded: true, attackCooldown: 0,
+    stunTicks: 0,
+    digCooldown: 0,
   };
 }
 
-function moveZombie(world: WorldModel, zombie: ZombieState): void {
+function moveZombie(world: WorldModel, zombie: ZombieState, targetY = zombie.y + ZOMBIE_HEIGHT / 2): void {
   const dt = 1 / 60;
   const wasGrounded = zombie.grounded;
+  const swimming = liquidAt(world, zombie.x, zombie.y);
   zombie.x += zombie.vx * dt;
   zombie.x = Math.max(-MAX_TILE_X * TILE_SIZE, Math.min(MAX_TILE_X * TILE_SIZE - ZOMBIE_WIDTH, zombie.x));
-  if (overlapsSolid(world, zombie.x, zombie.y)) {
-    if (wasGrounded && !overlapsSolid(world, zombie.x, zombie.y - TILE_SIZE)) {
-      zombie.y -= TILE_SIZE;
+  const obstacleTop = overlappingSolidTop(world, zombie.x, zombie.y);
+  if (obstacleTop !== null) {
+    const climbedY = obstacleTop - ZOMBIE_HEIGHT;
+    const canStep = zombie.y - climbedY <= 2 * TILE_SIZE + EPSILON &&
+      zombie.y - climbedY > 0 && !overlapsSolid(world, zombie.x, climbedY);
+    if ((wasGrounded || swimming) &&
+        canStep) {
+      zombie.y = climbedY;
     } else {
       zombie.x -= zombie.vx * dt;
       zombie.vx = 0;
     }
   }
-  zombie.vy = Math.min(400, zombie.vy + GRAVITY * dt);
+  const centerY = zombie.y + ZOMBIE_HEIGHT / 2;
+  zombie.vy = swimming ? Math.sign(targetY - centerY) * 28 : Math.min(400, zombie.vy + GRAVITY * dt);
   const nextY = zombie.y + zombie.vy * dt;
   zombie.grounded = false;
   if (overlapsSolid(world, zombie.x, nextY)) {
@@ -154,19 +196,45 @@ export function stepZombie(
   player: PlayerState,
   difficulty: Difficulty,
 ): ZombieStepResult {
+  const stunned = zombie.stunTicks > 0;
+  if (stunned) zombie.stunTicks--;
   if (zombie.attackCooldown > 0) zombie.attackCooldown--;
+  if (zombie.digCooldown > 0) zombie.digCooldown--;
   const playerCenter = player.x + 6;
   const zombieCenter = zombie.x + ZOMBIE_WIDTH / 2;
   const distance = playerCenter - zombieCenter;
   zombie.vx = Math.abs(distance) > ZOMBIE_ATTACK_RANGE ? Math.sign(distance) * ZOMBIE_SPEED : 0;
-  moveZombie(world, zombie);
+  moveZombie(world, zombie, player.y + 13);
   const close = Math.hypot(
     playerCenter - (zombie.x + ZOMBIE_WIDTH / 2),
     player.y + 13 - (zombie.y + ZOMBIE_HEIGHT / 2),
   ) <= ZOMBIE_ATTACK_RANGE;
-  if (close && zombie.attackCooldown === 0) {
+  if (close && !stunned && zombie.attackCooldown === 0) {
     zombie.attackCooldown = ZOMBIE_ATTACK_COOLDOWN;
     return { damage: difficulty.zombieDamage };
   }
   return { damage: 0 };
+}
+
+export function zombieMiningTarget(
+  world: WorldModel, zombie: ZombieState, player: PlayerState,
+): { x: number; y: number } | null {
+  const playerCenter = player.x + 6;
+  const zombieCenter = zombie.x + ZOMBIE_WIDTH / 2;
+  const distance = playerCenter - zombieCenter;
+  if (Math.abs(distance) > ZOMBIE_DETECTION_RANGE ||
+      Math.abs(player.y + 13 - (zombie.y + ZOMBIE_HEIGHT / 2)) > ZOMBIE_DETECTION_RANGE) return null;
+  const direction = Math.sign(distance) || 1;
+  const x = direction > 0
+    ? Math.floor((zombie.x + ZOMBIE_WIDTH + 1) / TILE_SIZE)
+    : Math.floor((zombie.x - 1) / TILE_SIZE);
+  const feetRow = Math.floor((zombie.y + ZOMBIE_HEIGHT + EPSILON) / TILE_SIZE);
+  let targetY = feetRow - 1;
+  while (targetY >= 0 && targetY >= feetRow - 4 && BLOCKS[world.getBlock(x, targetY)].solid) targetY--;
+  const wallHeight = feetRow - 1 - targetY;
+  if (wallHeight <= 2) return null;
+  targetY++;
+  const block = world.getBlock(x, targetY);
+  const durability = BLOCKS[block].durability;
+  return durability === null || block === 0 ? null : { x, y: targetY };
 }

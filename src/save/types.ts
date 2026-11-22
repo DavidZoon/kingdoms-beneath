@@ -8,10 +8,11 @@ import type { LightingQuality } from "../lighting/quality";
 import type { DifficultyId } from "../survival/Difficulty";
 import type { SurvivalState } from "../survival/SurvivalState";
 import type { NightWaveState, ZombieState } from "../entities/Zombie";
+import type { ChestState } from "../inventory/Chest";
 
 export interface SaveGame {
   format: "kingdoms-beneath";
-  schemaVersion: 13;
+  schemaVersion: 18;
   generatorVersion: GeneratorVersion;
   id: string;
   name: string;
@@ -37,6 +38,7 @@ export interface SaveGame {
   survival: SurvivalState;
   zombies: ZombieState[];
   nightWave: NightWaveState;
+  chests: ChestState[];
 }
 
 export interface BlockDamage {

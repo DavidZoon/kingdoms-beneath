@@ -3,8 +3,12 @@ import type { MaterialItemId, ItemId, StationId } from "../world/blocks";
 
 export const RECIPE_IDS = [
   "torch", "ladder", "woodStairs", "stoneStairs", "stonePickaxe",
+  "woodPickaxe",
   "workbench", "furnace", "copperIngot", "copperPickaxe", "forge", "ironIngot", "ironPickaxe",
   "woodSword", "copperSword", "ironSword",
+  "bed",
+  "woodSpikes", "ironSpikes",
+  "smallChest", "mediumChest", "largeChest",
 ] as const;
 export type RecipeId = (typeof RECIPE_IDS)[number];
 export const MAX_CRAFT_QUANTITY = ITEM_CAPACITY;
@@ -38,6 +42,10 @@ export const RECIPES: Record<RecipeId, Recipe> = {
   stonePickaxe: {
     id: "stonePickaxe", output: "stonePickaxe", outputPerRecipe: 1,
     materials: { pine_log: 1, stone: 1 }, ticksPerItem: 180, station: null,
+  },
+  woodPickaxe: {
+    id: "woodPickaxe", output: "woodPickaxe", outputPerRecipe: 1,
+    materials: { pine_log: 3 }, ticksPerItem: 120, station: "workbench",
   },
   workbench: {
     id: "workbench", output: "workbench", outputPerRecipe: 1,
@@ -78,6 +86,30 @@ export const RECIPES: Record<RecipeId, Recipe> = {
   ironSword: {
     id: "ironSword", output: "ironSword", outputPerRecipe: 1,
     materials: { pine_log: 1, iron_ingot: 3 }, ticksPerItem: 300, station: "forge",
+  },
+  bed: {
+    id: "bed", output: "bed", outputPerRecipe: 1,
+    materials: { pine_log: 3, cotton_plant: 2 }, ticksPerItem: 240, station: "workbench",
+  },
+  woodSpikes: {
+    id: "woodSpikes", output: "woodSpikes", outputPerRecipe: 2,
+    materials: { pine_log: 1 }, ticksPerItem: 120, station: "workbench",
+  },
+  ironSpikes: {
+    id: "ironSpikes", output: "ironSpikes", outputPerRecipe: 2,
+    materials: { iron_ingot: 1 }, ticksPerItem: 240, station: "forge",
+  },
+  smallChest: {
+    id: "smallChest", output: "smallChest", outputPerRecipe: 1,
+    materials: { pine_log: 8 }, ticksPerItem: 180, station: "workbench",
+  },
+  mediumChest: {
+    id: "mediumChest", output: "mediumChest", outputPerRecipe: 1,
+    materials: { smallChest: 1, pine_log: 6, copper_ingot: 2 }, ticksPerItem: 300, station: "workbench",
+  },
+  largeChest: {
+    id: "largeChest", output: "largeChest", outputPerRecipe: 1,
+    materials: { mediumChest: 1, pine_log: 10, iron_ingot: 4 }, ticksPerItem: 420, station: "forge",
   },
 };
 

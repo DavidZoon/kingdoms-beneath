@@ -1,4 +1,5 @@
 import { Block, BLOCKS, ITEM_BLOCKS, RESOURCES, TILE_ART_SIZE, isBlockItem, type BlockId, type MaterialItemId } from "../world/blocks";
+import { FRUIT_ITEMS } from "../world/resources";
 import { drawResourceIcon, drawResourceTile } from "./resourceArt";
 
 export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, x = 0): void {
@@ -94,6 +95,44 @@ export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, 
     ctx.fillStyle = "#d5aa69";
     ctx.fillRect(x + 8, 1, 3, 5);
     ctx.fillRect(x + 15, 2, 8, 2);
+  } else if (block === Block.Bed) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.fillStyle = "#674a35";
+    ctx.fillRect(x + 2, 7, 28, 21);
+    ctx.fillRect(x + 4, 25, 4, 7);
+    ctx.fillRect(x + 24, 25, 4, 7);
+    ctx.fillStyle = "#d7c6a0";
+    ctx.fillRect(x + 4, 4, 24, 11);
+    ctx.fillStyle = "#a65f55";
+    ctx.fillRect(x + 4, 14, 24, 10);
+    ctx.fillStyle = "#e5ddbd";
+    ctx.fillRect(x + 6, 6, 8, 7);
+  } else if (block === Block.WoodSpikes || block === Block.IronSpikes) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.fillStyle = block === Block.WoodSpikes ? "#8f633b" : "#919ba0";
+    for (let spike = 0; spike < 4; spike++) {
+      const left = x + spike * 8;
+      ctx.beginPath();
+      ctx.moveTo(left, TILE_ART_SIZE);
+      ctx.lineTo(left + 4, 5);
+      ctx.lineTo(left + 8, TILE_ART_SIZE);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = block === Block.WoodSpikes ? "#d0a066" : "#cbd3d5";
+    ctx.fillRect(x, 29, TILE_ART_SIZE, 3);
+  } else if (block === Block.SmallChest || block === Block.MediumChest || block === Block.LargeChest) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    const bands = block === Block.SmallChest ? 1 : block === Block.MediumChest ? 2 : 3;
+    ctx.fillStyle = block === Block.LargeChest ? "#68452f" : "#8b5f38";
+    ctx.fillRect(x + 2, 7, 28, 23);
+    ctx.fillStyle = "#c18a4e";
+    ctx.fillRect(x + 3, 5, 26, 8);
+    ctx.fillRect(x + 3, 23, 26, 3);
+    ctx.fillStyle = "#543622";
+    for (let band = 0; band < bands; band++) ctx.fillRect(x + 6 + band * 7, 7, 2, 22);
+    ctx.fillStyle = "#e0bc62";
+    ctx.fillRect(x + 14, 16, 4, 6);
   } else if (block === Block.Furnace || block === Block.Forge) {
     ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
     ctx.fillStyle = block === Block.Furnace ? "#75665d" : "#555c5f";
@@ -160,6 +199,9 @@ export function drawItemTexture(ctx: CanvasRenderingContext2D, item: MaterialIte
 const itemIconUrls = new Map<MaterialItemId, string>();
 
 export function itemIconUrl(item: MaterialItemId): string {
+  if (FRUIT_ITEMS.some((fruit) => fruit === item)) {
+    return new URL(`assets/${item}.png`, document.baseURI).href;
+  }
   const cached = itemIconUrls.get(item);
   if (cached) return cached;
   const canvas = document.createElement("canvas");

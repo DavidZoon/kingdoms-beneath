@@ -1,5 +1,5 @@
 import { Block, MAX_TILE_X, WORLD_HEIGHT, type BlockId } from "../world/blocks";
-import { RESOURCES, type ResourceId } from "../world/resources";
+import { FRUIT_ITEMS, RESOURCES, type ResourceId } from "../world/resources";
 
 type Support = ResourceId | "grass" | "dirt" | "stone" | "tree" | "water" | "river";
 export interface ResourceRule {
@@ -89,8 +89,37 @@ export const PLAIN_RESOURCES: readonly ResourceRule[] = ORIGINAL_FOREST_RESOURCE
 
 export const RESOURCE_RULES: BiomeRules = { forest: FOREST_RESOURCES, plain: PLAIN_RESOURCES };
 export const V4_RESOURCE_RULES: BiomeRules = { forest: ORIGINAL_FOREST_RESOURCES, plain: [] };
+const FRUIT_RESOURCE_RULES: readonly ResourceRule[] = [
+  { item: "apple", probability: 0.020, foundwithin: null, foundon: "oak_leaf", blocksblobavg: 1 },
+  { item: "pear", probability: 0.015, foundwithin: null, foundon: "pine_needle", blocksblobavg: 1 },
+  { item: "peach", probability: 0.012, foundwithin: null, foundon: "oak_leaf", blocksblobavg: 1 },
+  { item: "apricot", probability: 0.014, foundwithin: null, foundon: "pine_needle", blocksblobavg: 1 },
+];
+export const V7_RESOURCE_RULES: BiomeRules = {
+  forest: [...RESOURCE_RULES.forest, ...FRUIT_RESOURCE_RULES],
+  plain: [...RESOURCE_RULES.plain, ...FRUIT_RESOURCE_RULES.map((rule) => ({
+    ...rule, probability: rule.probability * 0.35,
+  }))],
+};
 
 export interface NaturalPickup { x: number; y: number; itemId: ResourceId; quantity: number }
+export interface CaveFeatureOdds {
+  smallChest: number;
+  mediumChest: number;
+  largeChest: number;
+  monster: number;
+  monsterWithChest: number;
+}
+export const CAVE_FEATURE_ODDS: Record<Biome, CaveFeatureOdds> = {
+  forest: {
+    smallChest: 0.004, mediumChest: 0.0015, largeChest: 0.0004,
+    monster: 0.012, monsterWithChest: 0.048,
+  },
+  plain: {
+    smallChest: 0.003, mediumChest: 0.001, largeChest: 0.00025,
+    monster: 0.009, monsterWithChest: 0.036,
+  },
+};
 interface Sector {
   blocks: Map<string, BlockId>;
   harvests: Map<string, ResourceId[]>;
@@ -234,7 +263,8 @@ export class BiomeResources {
             }
           } else {
             if (!eligible.has(target)) continue;
-            if (rule.item === "fish_raw" || rule.item === "shell" || rule.item === "pearl") {
+            if (rule.item === "fish_raw" || rule.item === "shell" || rule.item === "pearl" ||
+                FRUIT_ITEMS.some((fruit) => fruit === rule.item)) {
               const py = support === "river" ? cy - 1 : cy;
               resultHosts.add(key(cx, py));
               const pickup: NaturalPickup = { x: cx, y: py, itemId: rule.item, quantity: 1 };

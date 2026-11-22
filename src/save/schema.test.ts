@@ -83,7 +83,7 @@ describe("local save file validation", () => {
   it("migrates v11 with full health and an unstarted night-wave marker", () => {
     const save = fixture();
     const migrated = validateSave({ ...save, schemaVersion: 11, generatorVersion: 5 });
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(18);
     expect(migrated.difficulty).toBe("standard");
     expect(migrated.survival).toEqual({
       health: 100,
@@ -91,6 +91,8 @@ describe("local save file validation", () => {
       dead: false,
       respawnTicks: 0,
       spawnPoint: { x: save.player.x, y: save.player.y },
+      initialSpawnPoint: { x: save.player.x, y: save.player.y },
+      respawnBed: null,
     });
     expect(migrated.zombies).toEqual([]);
     expect(migrated.nightWave).toEqual({ lastStartedDay: -1, pending: 0, nextSpawnTick: save.tick });
@@ -106,7 +108,7 @@ describe("local save file validation", () => {
     expect(() => validateSave({
       ...creative,
       zombies: [{ id: "zombie-1", x: save.player.x + 48, y: save.player.y, vx: 0, vy: 0,
-        health: 40, grounded: true, attackCooldown: 0 }],
+        health: 40, grounded: true, attackCooldown: 0, stunTicks: 0, digCooldown: 0 }],
     })).toThrow(/créatif/);
   });
 
@@ -139,8 +141,8 @@ describe("local save file validation", () => {
 
   it.each([
     ["format", "other-game"],
-    ["schemaVersion", 14],
-    ["generatorVersion", 7],
+    ["schemaVersion", 19],
+    ["generatorVersion", 9],
     ["name", ""],
     ["id", "../not-a-filename"],
     ["tick", -1],
@@ -187,7 +189,7 @@ describe("local save file validation", () => {
     delete legacy.inventory.ladder;
     delete legacy.inventory.torch;
     const migrated = parseSave(JSON.stringify(legacy));
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(18);
     expect(migrated.generatorVersion).toBe(1);
     expect(migrated.inventory).toEqual(emptyInventory());
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 12 });
@@ -240,7 +242,7 @@ describe("local save file validation", () => {
     const { torch: _torch, ...inventory } = previous.inventory;
     const migrated = parseSave(JSON.stringify({ ...previous, schemaVersion: 3, inventory }));
     expect(migrated).toMatchObject({
-      schemaVersion: 13, generatorVersion: save.generatorVersion, tick: save.tick,
+      schemaVersion: 18, generatorVersion: save.generatorVersion, tick: save.tick,
       edits: save.edits, blockDamage: save.blockDamage, groundDrops: save.groundDrops,
       creativeMode: true, lightingQuality: "standard", selectedSlot: 2,
     });
@@ -270,7 +272,7 @@ describe("local save file validation", () => {
     old.inventory.dirt = 100;
     old.inventory.wood = 150;
     const migrated = validateSave(old);
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(18);
     expect(migrated.selectedSlot).toBe(4);
     expect(migrated.hotbar).toHaveLength(10);
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 99 });
@@ -361,7 +363,7 @@ describe("local save file validation", () => {
       ...save, schemaVersion: 6, generatorVersion: 2,
       blockDamage: [{ x: 20, y: 20, damage: 3 }],
     });
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(18);
     expect(migrated.generatorVersion).toBe(2);
     expect(migrated.hotbar[2]?.rotation).toBe(90);
     expect(migrated.edits[0].rotation).toBe(270);

@@ -26,6 +26,15 @@ function sessionWithTool(durability = 500): GameSession {
 }
 
 describe("non-stackable tools and stone pickaxes", () => {
+  it("defines wooden and iron variants alongside the restored stone pickaxe shape", () => {
+    expect(TOOLS.woodPickaxe).toMatchObject({
+      kind: "tool", miningPower: 1, maxDurability: 250, attackDamage: 2,
+    });
+    expect(TOOLS.ironPickaxe).toMatchObject({
+      kind: "tool", miningPower: 7, maxDurability: 1200, attackDamage: 14,
+    });
+  });
+
   it("allocates one inventory slot per new tool and never fills a matching shortcut", () => {
     const inventory = emptyInventory();
     const hotbar = [pickaxe(123), null];
@@ -134,7 +143,8 @@ describe("non-stackable tools and stone pickaxes", () => {
     restored.player.x = drop.x - 6;
     restored.step(idle);
     expect(restored.groundDrops).toHaveLength(0);
-    expect(restored.inventory.tools).toEqual([pickaxe(317)]);
+    expect(restored.totalItems("stonePickaxe")).toBe(2);
+    expect(restored.inventory.tools).toEqual([]);
     expect(restored.hotbar[6]).toEqual(pickaxe(42));
   });
 
@@ -142,6 +152,9 @@ describe("non-stackable tools and stone pickaxes", () => {
     const session = sessionWithTool(77);
     session.inventory.dirt = 99 * 24;
     session.dropSelectedItem();
+    for (let index = 0; index < session.hotbar.length; index++) {
+      session.hotbar[index] = { itemId: "dirt", quantity: 99 };
+    }
     session.player.x = session.groundDrops[0].x - 6;
     session.step(idle);
     expect(session.groundDrops[0]).toMatchObject(pickaxe(77));
@@ -157,11 +170,11 @@ describe("non-stackable tools and stone pickaxes", () => {
     expect(session.totalItems("pine_log")).toBe(0);
     expect(session.totalItems("stone")).toBe(0);
     for (let tick = 0; tick < RECIPES.stonePickaxe.ticksPerItem; tick++) session.step(idle);
-    expect(session.inventory.tools).toEqual([pickaxe()]);
+    expect(session.totalItems("stonePickaxe")).toBe(2);
     expect(session.crafting?.completed).toBe(1);
     const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
     for (let tick = 0; tick < RECIPES.stonePickaxe.ticksPerItem; tick++) restored.step(idle);
-    expect(restored.inventory.tools).toEqual([pickaxe(), pickaxe()]);
+    expect(restored.totalItems("stonePickaxe")).toBe(3);
     expect(restored.hotbar[2]).toEqual(pickaxe(300));
     expect(restored.crafting).toBeNull();
   });
@@ -169,6 +182,9 @@ describe("non-stackable tools and stone pickaxes", () => {
   it("rejects crafting when materials or one slot per tool are missing", () => {
     const session = sessionWithTool();
     session.inventory.pine_log = 1;
+    for (let index = 0; index < session.hotbar.length; index++) {
+      if (session.hotbar[index] === null) session.hotbar[index] = { itemId: "dirt", quantity: 99 };
+    }
     expect(session.startCraft("stonePickaxe", 1).ok).toBe(false);
     session.inventory.stone = 1;
     session.inventory.dirt = 99 * 24 - 1;
@@ -194,7 +210,7 @@ describe("non-stackable tools and stone pickaxes", () => {
     save.hotbar[2] = null;
     const { tools: _tools, ...inventory } = save.inventory;
     const migrated = validateSave({ ...save, schemaVersion: 7, generatorVersion: 3, inventory });
-    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.schemaVersion).toBe(18);
     expect(migrated.inventory.tools).toEqual([]);
     expect(migrated.edits).toEqual(save.edits);
     expect(migrated.backgroundEdits).toEqual(save.backgroundEdits);
