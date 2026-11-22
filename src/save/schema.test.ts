@@ -71,9 +71,65 @@ describe("local save file validation", () => {
     expect(parseSave(serializeSave(save))).toEqual(save);
   });
 
+  it("migrates v11 with full health and an unstarted night-wave marker", () => {
+    const save = fixture();
+    const migrated = validateSave({ ...save, schemaVersion: 11 });
+    expect(migrated.schemaVersion).toBe(12);
+    expect(migrated.difficulty).toBe("standard");
+    expect(migrated.survival).toEqual({
+      health: 100,
+      invulnerabilityTicks: 0,
+      dead: false,
+      respawnTicks: 0,
+      spawnPoint: { x: save.player.x, y: save.player.y },
+    });
+    expect(migrated.zombies).toEqual([]);
+    expect(migrated.nightWave).toEqual({ lastStartedDay: -1, pending: 0, nextSpawnTick: save.tick });
+  });
+
+  it("rejects malformed survival, zombies and night-wave state", () => {
+    const save = fixture();
+    expect(() => validateSave({ ...save, difficulty: "impossible" })).toThrow(/Difficulté/);
+    expect(() => validateSave({ ...save, survival: { ...save.survival, health: 0 } })).toThrow(/survie/);
+    expect(() => validateSave({ ...save, zombies: [{ ...save.survival, id: "bad" }] })).toThrow(/Zombie/);
+    expect(() => validateSave({ ...save, nightWave: { ...save.nightWave, pending: 999 } })).toThrow(/horde/);
+    const creative = { ...save, difficulty: "creative" as const };
+    expect(() => validateSave({
+      ...creative,
+      zombies: [{ id: "zombie-1", x: save.player.x + 48, y: save.player.y, vx: 0, vy: 0,
+        health: 40, grounded: true, attackCooldown: 0 }],
+    })).toThrow(/créatif/);
+  });
+
+  it("round-trips stations, processed metals, advanced tools and their unfinished recipe", () => {
+    const save = fixture();
+    save.inventory.copper_ingot = 2;
+    save.inventory.iron_ingot = 1;
+    save.inventory.tools.push({ itemId: "ironPickaxe", quantity: 1, durability: 777 });
+    save.hotbar[0] = { itemId: "furnace", quantity: 1 };
+    save.edits.push({ x: 20, y: 20, block: Block.Furnace });
+    save.crafting = { recipeId: "ironIngot", quantity: 2, completed: 1, progressTicks: 42 };
+    expect(parseSave(serializeSave(save))).toEqual(save);
+  });
+
+  it("rejects advanced stations, items and recipes in a v10 save", () => {
+    const save = fixture();
+    expect(() => validateSave({
+      ...save, schemaVersion: 10, hotbar: [{ itemId: "workbench", quantity: 1 }, ...save.hotbar.slice(1)],
+    })).toThrow(/version/);
+    expect(() => validateSave({
+      ...save, schemaVersion: 10,
+      edits: [...save.edits, { x: 20, y: 20, block: Block.Forge }],
+    })).toThrow(/terrain/);
+    expect(() => validateSave({
+      ...save, schemaVersion: 10,
+      crafting: { recipeId: "copperIngot", quantity: 1, completed: 0, progressTicks: 0 },
+    })).toThrow(/Fabrication/);
+  });
+
   it.each([
     ["format", "other-game"],
-    ["schemaVersion", 11],
+    ["schemaVersion", 13],
     ["generatorVersion", 6],
     ["name", ""],
     ["id", "../not-a-filename"],
@@ -121,7 +177,7 @@ describe("local save file validation", () => {
     delete legacy.inventory.ladder;
     delete legacy.inventory.torch;
     const migrated = parseSave(JSON.stringify(legacy));
-    expect(migrated.schemaVersion).toBe(10);
+    expect(migrated.schemaVersion).toBe(12);
     expect(migrated.generatorVersion).toBe(1);
     expect(migrated.inventory).toEqual(emptyInventory());
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 12 });
@@ -174,7 +230,7 @@ describe("local save file validation", () => {
     const { torch: _torch, ...inventory } = previous.inventory;
     const migrated = parseSave(JSON.stringify({ ...previous, schemaVersion: 3, inventory }));
     expect(migrated).toMatchObject({
-      schemaVersion: 10, generatorVersion: save.generatorVersion, tick: save.tick,
+      schemaVersion: 12, generatorVersion: save.generatorVersion, tick: save.tick,
       edits: save.edits, blockDamage: save.blockDamage, groundDrops: save.groundDrops,
       creativeMode: true, lightingQuality: "standard", selectedSlot: 2,
     });
@@ -204,7 +260,7 @@ describe("local save file validation", () => {
     old.inventory.dirt = 100;
     old.inventory.wood = 150;
     const migrated = validateSave(old);
-    expect(migrated.schemaVersion).toBe(10);
+    expect(migrated.schemaVersion).toBe(12);
     expect(migrated.selectedSlot).toBe(4);
     expect(migrated.hotbar).toHaveLength(10);
     expect(migrated.hotbar[0]).toEqual({ itemId: "dirt", quantity: 99 });
@@ -292,7 +348,7 @@ describe("local save file validation", () => {
       ...save, schemaVersion: 6, generatorVersion: 2,
       blockDamage: [{ x: 20, y: 20, damage: 3 }],
     });
-    expect(migrated.schemaVersion).toBe(10);
+    expect(migrated.schemaVersion).toBe(12);
     expect(migrated.generatorVersion).toBe(2);
     expect(migrated.hotbar[2]?.rotation).toBe(90);
     expect(migrated.edits[0].rotation).toBe(270);

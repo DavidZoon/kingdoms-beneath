@@ -48,15 +48,23 @@ export const Block = {
   Quartz: 37,
   Sulfur: 38,
   Water: 39,
+  Workbench: 40,
+  Furnace: 41,
+  Forge: 42,
 } as const;
 
 export type BlockId = (typeof Block)[keyof typeof Block];
-const CONSTRUCTION_ITEMS = ["dirt", "stone", "ladder", "torch", "woodStairs", "stoneStairs", "water"] as const;
+const CONSTRUCTION_ITEMS = [
+  "dirt", "stone", "ladder", "torch", "woodStairs", "stoneStairs", "water",
+  "workbench", "furnace", "forge",
+] as const;
+const PROCESSED_ITEMS = ["copper_ingot", "iron_ingot"] as const;
 export type BlockItemId = (typeof CONSTRUCTION_ITEMS)[number] | ResourceBlockItemId;
-export type MaterialItemId = (typeof CONSTRUCTION_ITEMS)[number] | ResourceId;
+export type ProcessedItemId = (typeof PROCESSED_ITEMS)[number];
+export type MaterialItemId = (typeof CONSTRUCTION_ITEMS)[number] | ProcessedItemId | ResourceId;
 export const BLOCK_ITEMS: readonly BlockItemId[] = [...CONSTRUCTION_ITEMS, ...RESOURCE_ITEMS.filter(isResourceBlock)];
-export const MATERIAL_ITEMS: readonly MaterialItemId[] = [...CONSTRUCTION_ITEMS, ...RESOURCE_ITEMS];
-export const TOOL_ITEMS = ["stonePickaxe"] as const;
+export const MATERIAL_ITEMS: readonly MaterialItemId[] = [...CONSTRUCTION_ITEMS, ...PROCESSED_ITEMS, ...RESOURCE_ITEMS];
+export const TOOL_ITEMS = ["stonePickaxe", "copperPickaxe", "ironPickaxe"] as const;
 export const ITEMS = [...MATERIAL_ITEMS, ...TOOL_ITEMS] as const;
 export type ToolItemId = (typeof TOOL_ITEMS)[number];
 export type ItemId = (typeof ITEMS)[number];
@@ -69,6 +77,8 @@ export interface ToolStack {
 export type Inventory = Record<MaterialItemId, number> & { tools: ToolStack[] };
 export const TOOLS: Record<ToolItemId, { category: "tools"; maxDurability: number; miningPower: number }> = {
   stonePickaxe: { category: "tools", maxDurability: 500, miningPower: 2 },
+  copperPickaxe: { category: "tools", maxDurability: 800, miningPower: 4 },
+  ironPickaxe: { category: "tools", maxDurability: 1200, miningPower: 7 },
 };
 
 export function isToolItem(itemId: ItemId): itemId is ToolItemId {
@@ -99,7 +109,14 @@ export const ITEM_LABELS: Record<ItemId, string> = {
   woodStairs: "Escalier en bois",
   stoneStairs: "Escalier en pierre",
   stonePickaxe: "Pioche en pierre",
+  copperPickaxe: "Pioche en cuivre",
+  ironPickaxe: "Pioche en fer",
   water: "Eau",
+  workbench: "Établi",
+  furnace: "Four",
+  forge: "Forge",
+  copper_ingot: "Lingot de cuivre",
+  iron_ingot: "Lingot de fer",
   ...Object.fromEntries(RESOURCE_ITEMS.map((item) => [item, RESOURCES[item].label])) as Record<ResourceId, string>,
 };
 
@@ -111,6 +128,9 @@ export const ITEM_BLOCKS: Record<BlockItemId, BlockId> = {
   woodStairs: Block.WoodStairs,
   stoneStairs: Block.StoneStairs,
   water: Block.Water,
+  workbench: Block.Workbench,
+  furnace: Block.Furnace,
+  forge: Block.Forge,
   ...Object.fromEntries(RESOURCE_ITEMS.filter(isResourceBlock).map((item) => [item, RESOURCES[item].block])) as Record<ResourceBlockItemId, BlockId>,
 };
 
@@ -122,7 +142,14 @@ export const ITEM_PLANES: Record<ItemId, readonly ConstructionPlane[]> = {
   woodStairs: ["foreground", "background"],
   stoneStairs: ["foreground", "background"],
   stonePickaxe: [],
+  copperPickaxe: [],
+  ironPickaxe: [],
   water: ["foreground"],
+  workbench: ["foreground"],
+  furnace: ["foreground"],
+  forge: ["foreground"],
+  copper_ingot: ["foreground"],
+  iron_ingot: ["foreground"],
   ...Object.fromEntries<readonly ConstructionPlane[]>(RESOURCE_ITEMS.map((item) => [item, RESOURCES[item].planes])) as Record<ResourceId, readonly ConstructionPlane[]>,
 };
 
@@ -159,6 +186,9 @@ export const BLOCKS: Record<
   [Block.WoodStairs]: { color: "#9b6b3f", solid: true, drop: "woodStairs", durability: 6, opacity: 1 },
   [Block.StoneStairs]: { color: "#687676", solid: true, drop: "stoneStairs", durability: 12, opacity: 1 },
   [Block.Water]: { color: "#438CCD", solid: false, drop: null, durability: null, opacity: 0, liquid: true },
+  [Block.Workbench]: { color: "#9b673a", solid: false, drop: "workbench", durability: 12, opacity: 1 },
+  [Block.Furnace]: { color: "#71615a", solid: false, drop: "furnace", durability: 20, opacity: 1 },
+  [Block.Forge]: { color: "#5b6062", solid: false, drop: "forge", durability: 28, opacity: 1 },
   ...Object.fromEntries(RESOURCE_ITEMS.filter(isResourceBlock).map((item) => {
     const resource = RESOURCES[item];
     return [resource.block, { color: resource.color, solid: resource.solid, drop: item,
@@ -173,6 +203,18 @@ export function isLiquidBlock(block: BlockId): boolean {
 
 export function isStairBlock(block: BlockId): boolean {
   return block === Block.WoodStairs || block === Block.StoneStairs;
+}
+
+export type StationId = "workbench" | "furnace" | "forge";
+export const STATION_IDS = ["workbench", "furnace", "forge"] as const satisfies readonly StationId[];
+export const STATION_BLOCKS: Record<StationId, BlockId> = {
+  workbench: Block.Workbench,
+  furnace: Block.Furnace,
+  forge: Block.Forge,
+};
+
+export function stationForBlock(block: BlockId): StationId | null {
+  return STATION_IDS.find((station) => STATION_BLOCKS[station] === block) ?? null;
 }
 
 export function isBlockId(value: unknown): value is BlockId {

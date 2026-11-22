@@ -109,6 +109,10 @@ h3 { font: 400 23px Georgia, serif; }
 .hud-identity { display: flex; flex-direction: column; font-size: 14px; text-shadow: 0 1px 3px #0009; }
 .hud-identity strong { font-family: Georgia, serif; font-size: 19px; color: #ffe4a3; }
 .hud-identity span { font-size: 12px; color: #f1f0dc; margin-top: 4px; }
+.health-readout { display: flex; align-items: center; gap: 5px; }
+.health-readout progress { width: 92px; height: 8px; accent-color: #c96e5b; }
+.survival-status { color: #ffd58a !important; min-height: 1.3em; }
+.difficulty-help { margin-top: 4px; color: #b9c6ae; font-size: 12px; line-height: 1.45; }
 .hud-actions { display: flex; align-items: flex-start; gap: 6px; }
 .hud-actions button, .hotbar button, .touch-controls button { pointer-events: auto; touch-action: none; user-select: none; }
 .hud-actions button { min-height: 36px; padding: 6px 12px; font-size: 12px; }
@@ -145,6 +149,8 @@ h3 { font: 400 23px Georgia, serif; }
 .drop-button { width: 100%; margin-top: 12px; }
 .craft-panel { display: grid; align-content: start; gap: 8px; border-left: 1px solid #8798774d; padding-left: 20px; }
 .craft-panel h3 { margin-top: 4px; }
+.craft-stations, .craft-cancel-help { margin: 0; color: #aebba5; font-size: 11px; line-height: 1.45; }
+.craft-cancel-help { margin-top: -2px; }
 .craft-panel label { color: #c2cdb4; font-size: 12px; line-height: 1.4; }
 #craft-quantity-max { margin-left: 12px; color: #e4c684; white-space: nowrap; }
 .craft-panel select {
@@ -210,6 +216,8 @@ h3 { font: 400 23px Georgia, serif; }
 .item-icon { position: relative; display: inline-grid; width: 20px; height: 20px; grid-row: span 2; }
 .item-icon .block-swatch { display: block; width: 100%; height: 100%; grid-row: auto; }
 .stonePickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; }
+.copperPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: sepia(1) saturate(1.8) hue-rotate(330deg) brightness(.92); }
+.ironPickaxe { background: url("/assets/stone-pickaxe.png") center / contain no-repeat; box-shadow: none; image-rendering: pixelated; filter: grayscale(1) contrast(1.15) brightness(1.12); }
 .item-durability { position: absolute; left: 0; bottom: 0; width: 100%; height: 4px; appearance: none; border: 0; background: #472e24; }
 .item-durability::-webkit-progress-bar { background: #472e24; }
 .item-durability::-webkit-progress-value { background: #9ac85e; }

@@ -1,5 +1,5 @@
 import {
-  PLAYER_HEIGHT, PLAYER_WIDTH, overlapsPlayer, stepPlayer,
+  PLAYER_HEIGHT, PLAYER_WIDTH, overlapsPlayer, playerOverlapsSolid, stepPlayer,
   type MovementInput, type PlayerState,
 } from "../player/PlayerController";
 import type { BlockDamage, GroundDrop, SaveGame } from "../save/types";
@@ -11,18 +11,28 @@ import {
   isRecipeId, RECIPES, requiredMaterials, validCraftQuantity, type CraftJob, type RecipeId,
 } from "../crafting/Recipes";
 import {
-  Block, BLOCKS, ITEM_BLOCKS, ITEM_LABELS, MAX_TILE_X, TILE_SIZE, WORLD_HEIGHT,
-  ITEM_PLANES, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isBlockItem, isConstructionPlane, isItemId, isLiquidBlock, isToolItem, rotateQuarterTurn,
-  type ConstructionPlane, type Inventory, type ItemId, type Rotation,
+  Block, BLOCKS, ITEM_BLOCKS, ITEM_LABELS, MATERIAL_ITEMS, MAX_TILE_X, TILE_SIZE, WORLD_HEIGHT,
+  ITEM_PLANES, STATION_BLOCKS, TOOLS, canPlaceItemOnPlane, canUseItemOnPlane, isBlockItem, isConstructionPlane, isItemId, isLiquidBlock, isToolItem, rotateQuarterTurn,
+  type ConstructionPlane, type Inventory, type ItemId, type Rotation, type StationId,
 } from "../world/blocks";
 import { cellKey, WorldModel } from "../world/WorldModel";
 import { isPlantItem, type PlantItemId } from "../world/resources";
 import type { LightingQuality } from "../lighting/quality";
+import { DIFFICULTIES, isDifficultyId, type DifficultyId } from "../survival/Difficulty";
+import {
+  PLAYER_MAX_HEALTH, RESPAWN_INVULNERABILITY_TICKS, RESPAWN_TICKS, type SurvivalState,
+} from "../survival/SurvivalState";
+import {
+  spawnZombie, stepZombie, zombieOverlapsTile,
+  type NightWaveState, type ZombieState,
+} from "../entities/Zombie";
+import { DAY_LENGTH_TICKS, dayPhaseAt } from "../lighting/WorldClock";
 
 export const MAX_STACK = ITEM_CAPACITY;
 export const MAX_EDITS = 100_000;
 export const MAX_GROUND_DROPS = 10_000;
 const PICKUP_RANGE = 24;
+const STATION_RANGE = 4 * TILE_SIZE;
 const damageKey = (x: number, y: number, plane: ConstructionPlane): string => `${plane}:${cellKey(x, y)}`;
 export type ActionResult = { ok: true } | { ok: false; reason: string };
 export type MiningResult =
@@ -56,6 +66,10 @@ export class GameSession {
   crafting: CraftJob | null;
   tick: number;
   lightingQuality: LightingQuality;
+  difficulty: DifficultyId;
+  readonly survival: SurvivalState;
+  readonly zombies: ZombieState[];
+  readonly nightWave: NightWaveState;
   private readonly header: SaveGame;
   private readonly damage = new Map<string, BlockDamage>();
   private creative: boolean;
@@ -74,6 +88,10 @@ export class GameSession {
     this.crafting = save.crafting ? { ...save.crafting } : null;
     this.tick = save.tick;
     this.lightingQuality = save.lightingQuality;
+    this.difficulty = save.difficulty;
+    this.survival = { ...save.survival, spawnPoint: { ...save.survival.spawnPoint } };
+    this.zombies = save.zombies.map((zombie) => ({ ...zombie }));
+    this.nightWave = { ...save.nightWave };
     this.creative = save.creativeMode;
     for (const entry of save.blockDamage) this.damage.set(damageKey(entry.x, entry.y, entry.plane), { ...entry });
   }
@@ -82,7 +100,7 @@ export class GameSession {
     const world = new WorldModel(seed, [], 5);
     return new GameSession({
       format: "kingdoms-beneath",
-      schemaVersion: 10,
+      schemaVersion: 12,
       generatorVersion: 5,
       id: crypto.randomUUID(),
       name,
@@ -104,6 +122,19 @@ export class GameSession {
       hotbarPlanes: Array.from({ length: HOTBAR_SLOT_COUNT }, () => "foreground"),
       selectedSlot: 2,
       crafting: null,
+      difficulty: "standard",
+      survival: {
+        health: PLAYER_MAX_HEALTH,
+        invulnerabilityTicks: 0,
+        dead: false,
+        respawnTicks: 0,
+        spawnPoint: {
+          x: 8 * TILE_SIZE,
+          y: world.generator.surfaceAt(8) * TILE_SIZE - PLAYER_HEIGHT,
+        },
+      },
+      zombies: [],
+      nightWave: { lastStartedDay: -1, pending: 0, nextSpawnTick: 0 },
       edits: [],
       backgroundEdits: [],
       groundDrops: [],
@@ -262,6 +293,17 @@ export class GameSession {
     this.creative = enabled;
   }
 
+  setDifficulty(difficulty: DifficultyId): ActionResult {
+    if (!isDifficultyId(difficulty)) return { ok: false, reason: "Difficulté inconnue." };
+    this.difficulty = difficulty;
+    if (difficulty === "creative") {
+      this.creative = true;
+      this.zombies.splice(0);
+      this.nightWave.pending = 0;
+    }
+    return { ok: true };
+  }
+
   grantResources(itemId: ItemId, quantity: number): ResourceGrantResult {
     if (!this.creative) return { ok: false, reason: "Activez le Mode créatif dans les options de la partie." };
     if (!isItemId(itemId) || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > ITEM_CAPACITY) {
@@ -272,10 +314,35 @@ export class GameSession {
     return { ok: true, added };
   }
 
+  stationNearby(station: StationId): boolean {
+    const centerX = this.player.x + PLAYER_WIDTH / 2;
+    const centerY = this.player.y + PLAYER_HEIGHT / 2;
+    const minX = Math.floor((centerX - STATION_RANGE) / TILE_SIZE);
+    const maxX = Math.ceil((centerX + STATION_RANGE) / TILE_SIZE);
+    const minY = Math.max(0, Math.floor((centerY - STATION_RANGE) / TILE_SIZE));
+    const maxY = Math.min(WORLD_HEIGHT - 2, Math.ceil((centerY + STATION_RANGE) / TILE_SIZE));
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        if (this.world.getBlockOnPlane(x, y, "foreground") === STATION_BLOCKS[station] &&
+            Math.hypot(x * TILE_SIZE + TILE_SIZE / 2 - centerX, y * TILE_SIZE + TILE_SIZE / 2 - centerY)
+              <= STATION_RANGE) return true;
+      }
+    }
+    return false;
+  }
+
+  canCraft(recipeId: RecipeId): boolean {
+    const station = RECIPES[recipeId].station;
+    return station === null || this.stationNearby(station);
+  }
+
   startCraft(recipeId: RecipeId, quantity: number): ActionResult {
     if (this.crafting) return { ok: false, reason: "Une fabrication est déjà en cours." };
     if (!isRecipeId(recipeId)) return { ok: false, reason: "Recette inconnue." };
     const recipe = RECIPES[recipeId];
+    if (recipe.station && !this.stationNearby(recipe.station)) {
+      return { ok: false, reason: `Approchez-vous d'un ${ITEM_LABELS[recipe.station]} pour fabriquer cette recette.` };
+    }
     if (!validCraftQuantity(recipe, quantity)) {
       return { ok: false, reason: `Choisissez une quantité valide par lots de ${recipe.outputPerRecipe}.` };
     }
@@ -318,6 +385,28 @@ export class GameSession {
       availableItemSpace(this.inventory, RECIPES[job.recipeId].output, this.hotbar) === 0;
   }
 
+  cancelCraft(): ActionResult {
+    const job = this.crafting;
+    if (!job) return { ok: false, reason: "Aucune fabrication n'est en cours." };
+    const recipe = RECIPES[job.recipeId];
+    const unstartedBatches = Math.max(
+      0,
+      job.quantity / recipe.outputPerRecipe - Math.ceil(job.completed / recipe.outputPerRecipe),
+    );
+    const refundable = recipe.outputPerRecipe * unstartedBatches;
+    const next = cloneInventory(this.inventory);
+    const hotbar = this.hotbar.map((stack) => stack ? { ...stack } : null);
+    for (const [itemId, quantity] of refundable > 0 ? requiredMaterials(recipe, refundable) : []) {
+      if (addItems(next, itemId, quantity, hotbar) !== quantity) {
+        return { ok: false, reason: "Rangement plein : libérez de la place avant d'annuler la fabrication." };
+      }
+    }
+    Object.assign(this.inventory, next);
+    this.hotbar.splice(0, this.hotbar.length, ...hotbar);
+    this.crafting = null;
+    return { ok: true };
+  }
+
   private advanceCraft(): void {
     const job = this.crafting;
     if (!job) return;
@@ -334,10 +423,200 @@ export class GameSession {
     return this.damage.get(damageKey(x, y, plane))?.damage ?? 0;
   }
 
+  takeDamage(amount: number): boolean {
+    if (this.difficulty === "creative" || this.survival.dead || this.survival.invulnerabilityTicks > 0 ||
+        !Number.isSafeInteger(amount) || amount <= 0) return false;
+    this.survival.health = Math.max(0, this.survival.health - amount);
+    this.survival.invulnerabilityTicks = 30;
+    if (this.survival.health > 0) return true;
+    this.applyDeathLoss();
+    this.survival.dead = true;
+    this.survival.respawnTicks = RESPAWN_TICKS;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    return true;
+  }
+
+  private addDeathDrop(stack: ItemStack): number {
+    const requested = stack.quantity;
+    let remaining = stack.quantity;
+    while (remaining > 0 && this.groundDrops.length < MAX_GROUND_DROPS) {
+      const quantity = Math.min(STACK_SIZE, remaining);
+      this.groundDrops.push({
+        id: crypto.randomUUID(),
+        x: this.player.x + PLAYER_WIDTH / 2 + ((this.groundDrops.length % 3) - 1) * TILE_SIZE,
+        y: this.player.y + PLAYER_HEIGHT / 2,
+        itemId: stack.itemId,
+        quantity,
+        ...(isToolStack(stack) ? { durability: stack.durability } : {}),
+      } as GroundDrop);
+      remaining -= quantity;
+    }
+    return requested - remaining;
+  }
+
+  private applyDeathLoss(): void {
+    const percent = DIFFICULTIES[this.difficulty].deathItemLossPercent;
+    if (percent === 0) return;
+    for (const itemId of MATERIAL_ITEMS) {
+      const inventoryLoss = Math.ceil(this.inventory[itemId] * percent / 100);
+      if (inventoryLoss > 0) {
+        const dropped = this.addDeathDrop({ itemId, quantity: inventoryLoss });
+        this.inventory[itemId] -= dropped;
+      }
+      for (const stack of this.hotbar) {
+        if (!stack || isToolStack(stack) || stack.itemId !== itemId) continue;
+        const hotbarLoss = Math.ceil(stack.quantity * percent / 100);
+        if (hotbarLoss > 0) {
+          stack.quantity -= this.addDeathDrop({ itemId, quantity: hotbarLoss });
+        }
+      }
+    }
+    const inventoryToolLoss = Math.ceil(this.inventory.tools.length * percent / 100);
+    const inventoryTools = this.inventory.tools.splice(
+      Math.max(0, this.inventory.tools.length - inventoryToolLoss), inventoryToolLoss,
+    );
+    for (const tool of inventoryTools) {
+      if (this.addDeathDrop(tool) === 0) this.inventory.tools.push(tool);
+    }
+    const hotbarTools = this.hotbar.flatMap((stack, index) =>
+      stack && isToolStack(stack) ? [{ stack, index }] : []);
+    const hotbarToolLoss = Math.ceil(hotbarTools.length * percent / 100);
+    for (const entry of hotbarTools.slice(-hotbarToolLoss)) {
+      if (this.addDeathDrop(entry.stack) > 0) this.hotbar[entry.index] = null;
+    }
+    for (let index = 0; index < this.hotbar.length; index++) {
+      const stack = this.hotbar[index];
+      if (stack && !isToolStack(stack) && stack.quantity === 0) this.hotbar[index] = null;
+    }
+  }
+
+  get respawning(): boolean {
+    return this.survival.dead;
+  }
+
+  private respawn(): void {
+    const { x, y } = this.survival.spawnPoint;
+    let spawnX = x;
+    let spawnY = y;
+    let safeSpawn = false;
+    for (let rise = 0; rise <= 6 && !safeSpawn; rise++) {
+      const candidate = { ...this.player, x, y: Math.max(0, y - rise * TILE_SIZE) };
+      if (!playerOverlapsSolid(this.world, candidate)) {
+        spawnX = candidate.x;
+        spawnY = candidate.y;
+        safeSpawn = true;
+      }
+    }
+    if (!safeSpawn) {
+      for (let offset = 1; offset <= 10; offset++) {
+        for (const direction of [-1, 1] as const) {
+          const candidate = {
+            ...this.player,
+            x: x + direction * offset * TILE_SIZE,
+            y: y - 2 * TILE_SIZE,
+          };
+          if (!playerOverlapsSolid(this.world, candidate)) {
+            spawnX = candidate.x;
+            spawnY = candidate.y;
+            safeSpawn = true;
+            break;
+          }
+        }
+        if (safeSpawn) break;
+      }
+    }
+    this.player.x = spawnX;
+    this.player.y = spawnY;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.grounded = false;
+    this.player.climbing = false;
+    this.survival.health = PLAYER_MAX_HEALTH;
+    this.survival.dead = false;
+    this.survival.respawnTicks = 0;
+    this.survival.invulnerabilityTicks = RESPAWN_INVULNERABILITY_TICKS;
+  }
+
+  private advanceNight(): void {
+    if (dayPhaseAt(this.tick) !== "Nuit") {
+      this.nightWave.pending = 0;
+      return;
+    }
+    const day = Math.floor(this.tick / DAY_LENGTH_TICKS);
+    if (this.nightWave.lastStartedDay !== day) {
+      this.nightWave.lastStartedDay = day;
+      this.nightWave.pending = DIFFICULTIES[this.difficulty].hordeSize;
+      this.nightWave.nextSpawnTick = this.tick;
+    }
+    if (this.difficulty === "creative" || this.nightWave.pending <= 0 || this.tick < this.nightWave.nextSpawnTick ||
+        this.zombies.length >= DIFFICULTIES[this.difficulty].maxActiveZombies) return;
+    const direction: -1 | 1 = this.nightWave.pending % 2 === 0 ? 1 : -1;
+    const spawnedInWave = DIFFICULTIES[this.difficulty].hordeSize - this.nightWave.pending;
+    for (let candidate = 0; candidate < 10; candidate++) {
+      const zombie = spawnZombie(
+        this.world, this.player, direction, crypto.randomUUID(), spawnedInWave * 2 + candidate,
+      );
+      if (!zombie) continue;
+      this.zombies.push(zombie);
+      this.nightWave.pending--;
+      this.nightWave.nextSpawnTick = this.tick + DIFFICULTIES[this.difficulty].spawnIntervalTicks;
+      return;
+    }
+    this.nightWave.nextSpawnTick = this.tick + 60;
+  }
+
+  private advanceEnemies(): void {
+    let damage = 0;
+    for (const zombie of this.zombies) {
+      damage = Math.max(damage, stepZombie(this.world, zombie, this.player, DIFFICULTIES[this.difficulty]).damage);
+    }
+    if (damage > 0) this.takeDamage(damage);
+  }
+
+  getZombieTarget(x: number, y: number): ZombieState | null {
+    if (!this.withinReach(x, y) || this.survival.dead) return null;
+    const target = this.traceTarget(x, y, "foreground");
+    if (target.x !== x || target.y !== y) return null;
+    return this.zombies.find((zombie) => zombieOverlapsTile(zombie, x, y)) ?? null;
+  }
+
+  attackZombie(x: number, y: number):
+    { ok: true; killed: boolean; toolBroken?: boolean } | { ok: false; reason: string } {
+    if (this.survival.dead) return { ok: false, reason: "Vous ne pouvez pas attaquer pendant la réapparition." };
+    const zombie = this.getZombieTarget(x, y);
+    if (!zombie) return { ok: false, reason: "Aucun ennemi accessible ici." };
+    zombie.health = Math.max(0, zombie.health - this.miningPower);
+    const killed = zombie.health === 0;
+    if (killed) {
+      const index = this.zombies.indexOf(zombie);
+      if (index >= 0) this.zombies.splice(index, 1);
+    }
+    const tool = this.hotbar[this.selectedSlot];
+    if (tool && isToolStack(tool)) {
+      tool.durability--;
+      if (tool.durability === 0) {
+        this.hotbar[this.selectedSlot] = null;
+        return { ok: true, killed, toolBroken: true };
+      }
+    }
+    return { ok: true, killed };
+  }
+
   step(input: MovementInput): void {
+    if (this.survival.invulnerabilityTicks > 0) this.survival.invulnerabilityTicks--;
+    if (this.survival.dead) {
+      this.survival.respawnTicks = Math.max(0, this.survival.respawnTicks - 1);
+      if (this.survival.respawnTicks === 0) this.respawn();
+      this.tick++;
+      return;
+    }
+
     stepPlayer(this.world, this.player, input);
     this.pickupNearby();
     this.advanceCraft();
+    this.advanceNight();
+    this.advanceEnemies();
     this.tick++;
   }
 
@@ -638,6 +917,10 @@ export class GameSession {
       hotbarPlanes: [...this.hotbarPlanes],
       selectedSlot: this.selectedSlot,
       crafting: this.crafting ? { ...this.crafting } : null,
+      difficulty: this.difficulty,
+      survival: { ...this.survival, spawnPoint: { ...this.survival.spawnPoint } },
+      zombies: this.zombies.map((zombie) => ({ ...zombie })),
+      nightWave: { ...this.nightWave },
       edits: this.world.edits,
       backgroundEdits: this.world.backgroundEdits,
       groundDrops: this.groundDrops.map((drop) => ({ ...drop })),

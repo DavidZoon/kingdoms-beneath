@@ -15,15 +15,21 @@ const milestones = [
   },
   {
     title: "Profondeur, construction et lumière",
-    status: "current",
-    label: "En cours · première version jouable",
-    description: "Grottes, parallaxe, cycle jour/nuit, torches, deux plans, rotation et premiers crafts/outils disponibles. Contenu artistique et performances mobiles à approfondir.",
+    status: "done",
+    label: "Réalisé",
+    description: "Grottes, parallaxe, cycle jour/nuit, torches, deux plans, rotation, stations de craft, lingots et pioches cuivre/fer disponibles. Contenu artistique et performances mobiles à approfondir.",
   },
   {
     title: "Application installable",
     status: "done",
     label: "Réalisé",
     description: "Installation PWA, jeu hors ligne, notification des mises à jour et choix de l'orientation.",
+  },
+  {
+    title: "Première nuit jouable",
+    status: "current",
+    label: "En cours · équilibrage",
+    description: "Santé, combat, zombies, hordes plafonnées, quatre difficultés dont un Mode créatif sans ennemis, perte récupérable à la mort et respawn protégé.",
   },
   {
     title: "MVP complet",

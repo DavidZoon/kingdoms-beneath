@@ -12,6 +12,14 @@ import { WorldModel, cellKey, type TileEdit } from "../world/WorldModel";
 import { PLANT_ITEMS } from "../world/resources";
 import { isLightingQuality } from "../lighting/quality";
 import type { BlockDamage, GroundDrop, SaveGame } from "./types";
+import { DIFFICULTIES, isDifficultyId } from "../survival/Difficulty";
+import {
+  PLAYER_MAX_HEALTH, RESPAWN_INVULNERABILITY_TICKS, RESPAWN_TICKS, type SurvivalState,
+} from "../survival/SurvivalState";
+import {
+  ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_MAX_HEALTH, ZOMBIE_HEIGHT, ZOMBIE_WIDTH,
+  zombieOverlapsSolid, type NightWaveState, type ZombieState,
+} from "../entities/Zombie";
 
 export const MAX_SAVE_BYTES = 10 * 1024 * 1024;
 
@@ -36,10 +44,13 @@ function text(value: unknown, max: number): value is string {
 }
 
 function itemAvailableInVersion(itemId: ItemId, version: unknown): boolean {
-  if (isToolItem(itemId)) return integer(version, 8, 10);
-  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 10);
-  if (itemId === "torch") return integer(version, 4, 10);
-  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 10);
+  if (itemId === "copperPickaxe" || itemId === "ironPickaxe") return integer(version, 11, 12);
+  if (itemId === "workbench" || itemId === "furnace" || itemId === "forge" ||
+      itemId === "copper_ingot" || itemId === "iron_ingot") return integer(version, 11, 12);
+  if (isToolItem(itemId)) return integer(version, 8, 12);
+  if (itemId === "woodStairs" || itemId === "stoneStairs") return integer(version, 5, 12);
+  if (itemId === "torch") return integer(version, 4, 12);
+  return ["dirt", "stone", "pine_log", "ladder"].includes(itemId) || integer(version, 9, 12);
 }
 
 function validateStack(value: unknown, hasTools: boolean, hasRotations: boolean, location = "objet"): ItemStack {
@@ -81,15 +92,18 @@ export function validateSave(value: unknown): SaveGame {
   const legacy = value.schemaVersion === 1 && value.generatorVersion === 1;
   const current = (value.schemaVersion === 2 || value.schemaVersion === 3 ||
     value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 ||
-    value.schemaVersion === 7 || value.schemaVersion === 8 || value.schemaVersion === 9 || value.schemaVersion === 10) &&
+    value.schemaVersion === 7 || value.schemaVersion === 8 || value.schemaVersion === 9 ||
+    value.schemaVersion === 10 || value.schemaVersion === 11 || value.schemaVersion === 12) &&
     (value.generatorVersion === 1 || value.generatorVersion === 2 ||
-      (integer(value.schemaVersion, 7, 10) && value.generatorVersion === 3) ||
-      (integer(value.schemaVersion, 9, 10) && value.generatorVersion === 4) ||
-      (value.schemaVersion === 10 && value.generatorVersion === 5));
+      (integer(value.schemaVersion, 7, 12) && value.generatorVersion === 3) ||
+      (integer(value.schemaVersion, 9, 12) && value.generatorVersion === 4) ||
+      (integer(value.schemaVersion, 10, 12) && value.generatorVersion === 5));
   if (!legacy && !current) {
     throw new SaveValidationError("Version de sauvegarde ou de générateur non prise en charge.");
   }
-  const hasResources = value.schemaVersion === 9 || value.schemaVersion === 10;
+  const hasSurvival = value.schemaVersion === 12;
+  const hasAdvancedCrafting = integer(value.schemaVersion, 11, 12);
+  const hasResources = integer(value.schemaVersion, 9, 12);
   const hasTools = value.schemaVersion === 8 || hasResources;
   const hasLayers = value.schemaVersion === 7 || hasTools;
   const hasRotations = value.schemaVersion === 6 || hasLayers;
@@ -153,7 +167,9 @@ export function validateSave(value: unknown): SaveGame {
     };
   if (hasResources) {
     for (const item of MATERIAL_ITEMS) {
-      const quantity = inventory[item];
+      const advancedItem = item === "workbench" || item === "furnace" || item === "forge" ||
+        item === "copper_ingot" || item === "iron_ingot";
+      const quantity = advancedItem && !hasAdvancedCrafting ? 0 : inventory[item];
       if (!integer(quantity, 0, MAX_STACK)) throw new SaveValidationError(`Quantité de ${item} invalide.`);
       validatedInventory[item] = quantity;
     }
@@ -164,7 +180,9 @@ export function validateSave(value: unknown): SaveGame {
     }
     validatedInventory.tools = inventory.tools.map((entry: unknown) => {
       const stack = validateStack(entry, true, false);
-      if (!isToolStack(stack)) throw new SaveValidationError("Objet non outil dans la catégorie Outils.");
+      if (!isToolStack(stack) || !itemAvailableInVersion(stack.itemId, value.schemaVersion)) {
+        throw new SaveValidationError("Outil incompatible avec la version ou objet non outil dans la catégorie Outils.");
+      }
       return stack;
     });
   } else if (inventory.tools !== undefined &&
@@ -208,6 +226,9 @@ export function validateSave(value: unknown): SaveGame {
     if (value.crafting !== null) {
       const job = value.crafting;
       if (!record(job) || !isRecipeId(job.recipeId) ||
+          (!hasAdvancedCrafting && RECIPES[job.recipeId].station !== null) ||
+          (!hasAdvancedCrafting && ["workbench", "furnace", "copperIngot", "copperPickaxe",
+            "forge", "ironIngot", "ironPickaxe"].includes(job.recipeId)) ||
           (!hasTools && job.recipeId === "stonePickaxe") ||
           typeof job.quantity !== "number" || !validCraftQuantity(RECIPES[job.recipeId], job.quantity) ||
           !integer(job.completed, 0, job.quantity - 1) ||
@@ -269,7 +290,9 @@ export function validateSave(value: unknown): SaveGame {
         !integer(edit.y, 0, WORLD_HEIGHT - 2) || !isBlockId(edit.block) ||
         edit.block === Block.Bedrock || (!hasResources && edit.block > Block.StoneStairs) ||
         (!hasLighting && edit.block === Block.Torch) ||
-        (!hasHotbar && (edit.block === Block.WoodStairs || edit.block === Block.StoneStairs))) {
+        (!hasHotbar && (edit.block === Block.WoodStairs || edit.block === Block.StoneStairs)) ||
+        (!hasAdvancedCrafting && (edit.block === Block.Workbench || edit.block === Block.Furnace ||
+          edit.block === Block.Forge))) {
       throw new SaveValidationError("Modification de terrain invalide.");
     }
     const key = cellKey(edit.x, edit.y);
@@ -354,7 +377,7 @@ export function validateSave(value: unknown): SaveGame {
     }
     collected.add(id);
   }
-  const rawPlants = value.schemaVersion === 10 ? value.collectedPlants : [];
+  const rawPlants = integer(value.schemaVersion, 10, 12) ? value.collectedPlants : [];
   if (!Array.isArray(rawPlants) || rawPlants.length > MAX_EDITS) {
     throw new SaveValidationError("Liste de plantes récoltées invalide.");
   }
@@ -373,8 +396,77 @@ export function validateSave(value: unknown): SaveGame {
     }
     collectedPlants.add(id);
   }
+  const rawSurvival = hasSurvival ? value.survival : {
+    health: PLAYER_MAX_HEALTH, invulnerabilityTicks: 0, dead: false, respawnTicks: 0,
+    spawnPoint: { x: playerX, y: playerY },
+  };
+  if (!record(rawSurvival) ||
+      !integer(rawSurvival.health, 0, PLAYER_MAX_HEALTH) ||
+      !integer(rawSurvival.invulnerabilityTicks, 0, RESPAWN_INVULNERABILITY_TICKS) ||
+      typeof rawSurvival.dead !== "boolean" ||
+      !integer(rawSurvival.respawnTicks, 0, RESPAWN_TICKS) ||
+      (rawSurvival.dead ? rawSurvival.health !== 0 || rawSurvival.respawnTicks === 0
+        : rawSurvival.health === 0 || rawSurvival.respawnTicks !== 0) ||
+      !record(rawSurvival.spawnPoint) ||
+      !finite(rawSurvival.spawnPoint.x, -MAX_TILE_X * TILE_SIZE, MAX_TILE_X * TILE_SIZE - PLAYER_WIDTH) ||
+      !finite(rawSurvival.spawnPoint.y, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - PLAYER_HEIGHT)) {
+    throw new SaveValidationError("État de survie invalide.");
+  }
+  const survival: SurvivalState = {
+    health: rawSurvival.health,
+    invulnerabilityTicks: rawSurvival.invulnerabilityTicks,
+    dead: rawSurvival.dead,
+    respawnTicks: rawSurvival.respawnTicks,
+    spawnPoint: { x: rawSurvival.spawnPoint.x, y: rawSurvival.spawnPoint.y },
+  };
+  const difficulty = hasSurvival ? value.difficulty : "standard";
+  if (!isDifficultyId(difficulty)) throw new SaveValidationError("Difficulté de sauvegarde invalide.");
+  const rawZombies = hasSurvival ? value.zombies : [];
+  if (!Array.isArray(rawZombies) || rawZombies.length > DIFFICULTIES.perilous.maxActiveZombies) {
+    throw new SaveValidationError("Liste de zombies invalide ou trop volumineuse.");
+  }
+  if (difficulty === "creative" && rawZombies.length > 0) {
+    throw new SaveValidationError("Le mode créatif ne peut pas contenir de zombies.");
+  }
+  const zombieIds = new Set<string>();
+  const zombies: ZombieState[] = rawZombies.map((entry: unknown) => {
+    if (!record(entry) || !text(entry.id, 80) || !/^[a-zA-Z0-9-]+$/.test(entry.id) ||
+        zombieIds.has(entry.id) ||
+        !finite(entry.x, -MAX_TILE_X * TILE_SIZE, MAX_TILE_X * TILE_SIZE - ZOMBIE_WIDTH) ||
+        !finite(entry.y, 0, (WORLD_HEIGHT - 1) * TILE_SIZE - ZOMBIE_HEIGHT) ||
+        !finite(entry.vx, -100, 100) || !finite(entry.vy, -400, 400) ||
+        !integer(entry.health, 1, ZOMBIE_MAX_HEALTH) ||
+        typeof entry.grounded !== "boolean" ||
+        !integer(entry.attackCooldown, 0, ZOMBIE_ATTACK_COOLDOWN)) {
+      throw new SaveValidationError("Zombie de sauvegarde invalide.");
+    }
+    zombieIds.add(entry.id);
+    const zombie = {
+      id: entry.id, x: entry.x, y: entry.y, vx: entry.vx, vy: entry.vy, health: entry.health,
+      grounded: entry.grounded, attackCooldown: entry.attackCooldown,
+    };
+    if (zombieOverlapsSolid(world, zombie)) throw new SaveValidationError("Zombie bloqué dans un bloc solide.");
+    return zombie;
+  });
+  const rawNightWave = hasSurvival ? value.nightWave : {
+    lastStartedDay: -1, pending: 0, nextSpawnTick: value.tick,
+  };
+  if (!record(rawNightWave) ||
+      !integer(rawNightWave.lastStartedDay, -1, Number.MAX_SAFE_INTEGER) ||
+      !integer(rawNightWave.pending, 0, DIFFICULTIES.perilous.hordeSize) ||
+      !integer(rawNightWave.nextSpawnTick, 0, Number.MAX_SAFE_INTEGER)) {
+    throw new SaveValidationError("État de horde nocturne invalide.");
+  }
+  if (difficulty === "creative" && rawNightWave.pending !== 0) {
+    throw new SaveValidationError("Le mode créatif ne peut pas conserver de horde en attente.");
+  }
+  const nightWave: NightWaveState = {
+    lastStartedDay: rawNightWave.lastStartedDay,
+    pending: rawNightWave.pending,
+    nextSpawnTick: rawNightWave.nextSpawnTick,
+  };
   const result: SaveGame = {
-    format: "kingdoms-beneath", schemaVersion: 10, generatorVersion,
+    format: "kingdoms-beneath", schemaVersion: 12, generatorVersion,
     id: value.id, name: value.name, seed: value.seed,
     createdAt: value.createdAt, updatedAt: value.updatedAt, tick: value.tick,
     player: {
@@ -386,6 +478,7 @@ export function validateSave(value: unknown): SaveGame {
     groundDrops, creativeMode, blockDamage, lightingQuality,
     collectedNaturalPickups: [...collected].sort(),
     collectedPlants: [...collectedPlants].sort(),
+    difficulty, survival, zombies, nightWave,
   };
   if (playerOverlapsSolid(world, result.player)) {
     throw new SaveValidationError("Le joueur est bloqué dans un bloc solide.");

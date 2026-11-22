@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GameSession } from "../game/GameSession";
 import { parseSave, serializeSave } from "../save/schema";
-import type { MaterialItemId } from "../world/blocks";
+import { Block, BLOCKS, TILE_SIZE, type BlockId, type MaterialItemId } from "../world/blocks";
 import { clampCraftQuantity, MAX_CRAFT_QUANTITY, RECIPES, requiredMaterials, type RecipeId } from "./Recipes";
 
 const idle = { left: false, right: false, jump: false, run: false, up: false, down: false };
@@ -160,6 +160,30 @@ describe("progressive crafting", () => {
     expect(session.crafting).toBeNull();
   });
 
+  it("cancels atomically and returns only batches that have not produced an output", () => {
+    const session = GameSession.create("Test", "craft-cancel", 1000);
+    session.hotbar.fill(null);
+    session.inventory.pine_log = 2;
+    expect(session.startCraft("torch", 4)).toEqual({ ok: true });
+    advance(session, RECIPES.torch.ticksPerItem);
+    expect(session.inventory.torch).toBe(1);
+    expect(session.cancelCraft()).toEqual({ ok: true });
+    expect(session.inventory.pine_log).toBe(1);
+    expect(session.inventory.torch).toBe(1);
+    expect(session.crafting).toBeNull();
+  });
+
+  it("refuses cancellation without losing reserved materials when the return cannot fit", () => {
+    const session = GameSession.create("Test", "craft-cancel-full", 1000);
+    session.hotbar.fill(null);
+    session.inventory.pine_log = 1;
+    expect(session.startCraft("torch", 2)).toEqual({ ok: true });
+    session.inventory.dirt = 99 * 24;
+    const before = session.snapshot(2000);
+    expect(session.cancelCraft()).toMatchObject({ ok: false });
+    expect(session.snapshot(2000)).toEqual(before);
+  });
+
   it("round-trips an unfinished batch and continues without reserving or producing twice", () => {
     const session = GameSession.create("Test", "craft", 1000);
     session.hotbar.fill(null);
@@ -235,5 +259,93 @@ describe("craft quantity selection", () => {
   it("returns zero when no full recipe can be made", () => {
     expect(clampCraftQuantity(RECIPES.torch, 2, () => 0)).toBe(0);
     expect(clampCraftQuantity(RECIPES.stonePickaxe, 5, (itemId) => itemId === "pine_log" ? 5 : 0)).toBe(0);
+  });
+});
+
+describe("crafting stations and metal progression", () => {
+  it.each([Block.Workbench, Block.Furnace, Block.Forge])(
+    "keeps station block %s on the foreground without obstructing the player",
+    (block) => {
+      expect(BLOCKS[block]).toMatchObject({ solid: false });
+    },
+  );
+
+  function putStation(session: GameSession, block: BlockId): void {
+    const offset = block === Block.Workbench ? 1 : block === Block.Furnace ? 2 : 3;
+    const x = Math.floor((session.player.x + 8) / TILE_SIZE) + offset;
+    const y = Math.floor((session.player.y + 20) / TILE_SIZE);
+    session.world.setBlockOnPlane(x, y, block, 0, "foreground", true);
+  }
+
+  it("requires a nearby station before reserving ingredients and keeps a started job progressing", () => {
+    const session = GameSession.create("Stations", "station-test", 1000);
+    session.inventory.copper_ore = 2;
+    session.inventory.coal = 1;
+    expect(session.startCraft("copperIngot", 1)).toMatchObject({
+      ok: false, reason: expect.stringContaining("Four"),
+    });
+    expect(session.inventory.copper_ore).toBe(2);
+
+    putStation(session, Block.Furnace);
+    expect(session.startCraft("copperIngot", 1)).toEqual({ ok: true });
+    expect(session.inventory.copper_ore).toBe(0);
+    expect(session.inventory.coal).toBe(0);
+
+    session.world.setBlockOnPlane(
+      Math.floor((session.player.x + 8) / TILE_SIZE) + 2,
+      Math.floor((session.player.y + 20) / TILE_SIZE),
+      Block.Air, 0, "foreground", true,
+    );
+    advance(session, RECIPES.copperIngot.ticksPerItem);
+    expect(session.inventory.copper_ingot).toBe(1);
+    expect(session.crafting).toBeNull();
+  });
+
+  it("supports the complete workbench, furnace and forge progression across a reload", () => {
+    const session = GameSession.create("Metals", "metal-test", 1000);
+    session.inventory.pine_log = 4;
+    session.inventory.stone = 8;
+    session.inventory.clay = 4;
+    expect(session.startCraft("workbench", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.workbench.ticksPerItem);
+    putStation(session, Block.Workbench);
+    expect(session.startCraft("furnace", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.furnace.ticksPerItem);
+    putStation(session, Block.Furnace);
+
+    session.inventory.copper_ore = 4;
+    session.inventory.coal = 2;
+    expect(session.startCraft("copperIngot", 2)).toEqual({ ok: true });
+    advance(session, RECIPES.copperIngot.ticksPerItem * 2);
+
+    session.inventory.pine_log = 1;
+    expect(session.startCraft("copperPickaxe", 1)).toEqual({ ok: true });
+    advance(session, RECIPES.copperPickaxe.ticksPerItem / 2);
+    const restored = new GameSession(parseSave(serializeSave(session.snapshot(2000))));
+    advance(restored, RECIPES.copperPickaxe.ticksPerItem / 2);
+    expect(restored.inventory.tools).toContainEqual({
+      itemId: "copperPickaxe", quantity: 1, durability: 800,
+    });
+    expect(restored.canCraft("ironPickaxe")).toBe(false);
+
+    restored.inventory.iron_ore = 8;
+    restored.inventory.coal = 8;
+    expect(restored.startCraft("ironIngot", 4)).toEqual({ ok: true });
+    advance(restored, RECIPES.ironIngot.ticksPerItem * 4);
+    restored.inventory.stone = 12;
+    restored.inventory.coal = 2;
+    expect(restored.startCraft("forge", 1)).toEqual({ ok: true });
+    advance(restored, RECIPES.forge.ticksPerItem);
+    putStation(restored, Block.Forge);
+    restored.inventory.iron_ore = 6;
+    restored.inventory.coal = 6;
+    expect(restored.startCraft("ironIngot", 3)).toEqual({ ok: true });
+    advance(restored, RECIPES.ironIngot.ticksPerItem * 3);
+    restored.inventory.pine_log = 1;
+    expect(restored.startCraft("ironPickaxe", 1)).toEqual({ ok: true });
+    advance(restored, RECIPES.ironPickaxe.ticksPerItem);
+    expect(restored.inventory.tools).toContainEqual({
+      itemId: "ironPickaxe", quantity: 1, durability: 1200,
+    });
   });
 });

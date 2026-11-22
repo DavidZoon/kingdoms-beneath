@@ -7,7 +7,7 @@ import { isToolStack } from "../inventory/Inventory";
 import {
   CAVE_AMBIENT, calculateLightField, carriedTorchSource, lightBrightness, withLightSources, type LightField,
 } from "../lighting/LightField";
-import { daylightAt } from "../lighting/WorldClock";
+import { daylightAt, dayPhaseAt, type DayPhase } from "../lighting/WorldClock";
 import { getCrackSegments } from "../rendering/blockCracks";
 import { darkenBackgroundPixels } from "../rendering/backgroundTint";
 import { drawBlockTexture, drawItemTexture } from "../rendering/blockTextures";
@@ -22,6 +22,7 @@ import {
 } from "../world/blocks";
 import { cellKey, chunkOf } from "../world/WorldModel";
 import { isPlantItem } from "../world/resources";
+import { ZOMBIE_MAX_HEALTH } from "../entities/Zombie";
 
 export interface WorldCallbacks {
   onHud: () => void;
@@ -39,6 +40,7 @@ export class WorldScene extends Phaser.Scene {
   private backgroundCracks!: Phaser.GameObjects.Graphics;
   private lighting!: Phaser.GameObjects.Graphics;
   private dropDurability!: Phaser.GameObjects.Graphics;
+  private zombies!: Phaser.GameObjects.Graphics;
   private readonly miningHold = new MiningHold();
   private readonly blockInteraction = new BlockInteraction();
   private tileAtlas!: Phaser.Textures.CanvasTexture;
@@ -56,6 +58,7 @@ export class WorldScene extends Phaser.Scene {
   private lightFieldKey = "";
   private lightRevision = -1;
   private lightRenderKey = "";
+  private lastDayPhase: DayPhase = "Jour";
 
   constructor(
     private readonly session: GameSession,
@@ -79,6 +82,7 @@ export class WorldScene extends Phaser.Scene {
     this.backgroundCracks = this.add.graphics().setDepth(-1);
     this.lighting = this.add.graphics().setDepth(4.5);
     this.dropDurability = this.add.graphics().setDepth(3.1);
+    this.zombies = this.add.graphics().setDepth(3);
     this.createTileAtlas();
     this.createDropTextures();
     this.createActor();
@@ -98,7 +102,7 @@ export class WorldScene extends Phaser.Scene {
       this.target = { x: Math.floor(worldPoint.x / TILE_SIZE), y: Math.floor(worldPoint.y / TILE_SIZE) };
     };
     const press = (event: PointerEvent): void => {
-      if (this.paused || !this.controls.canInteract || event.button !== 0) return;
+      if (this.paused || this.session.survival.dead || !this.controls.canInteract || event.button !== 0) return;
       point(event);
       this.miningHold.reset();
       this.actionCooldown = 0;
@@ -158,6 +162,7 @@ export class WorldScene extends Phaser.Scene {
       this.backgroundChunks.clear();
     });
     this.callbacks.onHud();
+    this.lastDayPhase = dayPhaseAt(this.session.tick);
   }
 
   zoomBy(delta: number): void {
@@ -187,14 +192,17 @@ export class WorldScene extends Phaser.Scene {
     this.actionCooldown -= elapsed;
     if (!this.controls.canInteract) this.blockInteraction.reset();
     const selection = this.selectionKey();
-    const action = this.controls.canInteract && this.pinchDistance === 0
+    const action = !this.session.survival.dead && this.controls.canInteract && this.pinchDistance === 0
       ? this.blockInteraction.heldAction(selection) : null;
     const tapPlacement = this.blockInteraction.consumePlacement(selection);
     const { x, y } = this.target;
     const plantCell = this.session.getPlantTarget(x, y);
+    const combatTarget = action === "mine" ? this.session.getZombieTarget(x, y) : null;
     const miningCell = blockActionFor(this.session.selectedItem) === "mine"
       ? this.session.getMiningTarget(x, y) : null;
-    const miningTarget = action === "harvest"
+    const miningTarget = combatTarget
+      ? `${combatTarget.id}:${combatTarget.health}:${selection}`
+      : action === "harvest"
       ? plantCell ? `${cellKey(x, y)}:${selection}:${plantCell.id}` : null
       : action === "mine"
       ? `${cellKey(x, y)}:${selection}:${miningCell
@@ -203,6 +211,15 @@ export class WorldScene extends Phaser.Scene {
       : null;
     const miningTicks = this.miningHold.advance(delta, miningTarget);
     for (let tick = 0; tick < miningTicks; tick++) {
+      if (combatTarget) {
+        const result = this.session.attackZombie(x, y);
+        this.callbacks.onAction(!result.ok ? result.reason :
+          result.toolBroken ? "L'outil s'est cassé pendant le combat." :
+          result.killed ? "Zombie vaincu." : "Coup porté au zombie.");
+        this.callbacks.onHud();
+        if (result.ok && (result.killed || result.toolBroken)) this.miningHold.reset();
+        break;
+      }
       if (action === "harvest" && plantCell) {
         const result = this.session.harvestPlant(x, y);
         this.callbacks.onAction(result.ok ? `Cueillette : ${ITEM_LABELS[plantCell.itemId]}.` : result.reason);
@@ -234,7 +251,7 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     if ((action === "place" && this.actionCooldown <= 0) ||
-        (tapPlacement && this.controls.canInteract && this.pinchDistance === 0)) {
+        (tapPlacement && !this.session.survival.dead && this.controls.canInteract && this.pinchDistance === 0)) {
       const placementTarget = tapPlacement ? this.tapTarget : this.target;
       const result = this.session.place(placementTarget.x, placementTarget.y);
       this.blockInteraction.recordPlacement();
@@ -248,14 +265,47 @@ export class WorldScene extends Phaser.Scene {
     const { player } = this.session;
     this.actor.setPosition(player.x, player.y);
     if (player.vx !== 0) this.actor.setFlipX(player.vx < 0);
+    this.actor.setAlpha(this.session.survival.dead ? 0.3 :
+      this.session.survival.invulnerabilityTicks > 0 && Math.floor(this.session.tick / 4) % 2 === 0 ? 0.45 : 1);
+    this.drawZombies();
     this.updateCameraAndChunks();
-    const selectionTarget = plantCell ?? miningCell ?? this.target;
+    const selectionTarget = combatTarget
+      ? { x: Math.floor(combatTarget.x / TILE_SIZE), y: Math.floor(combatTarget.y / TILE_SIZE) }
+      : plantCell ?? miningCell ?? this.target;
     this.selection.clear().lineStyle(1, this.session.withinReach(this.target.x, this.target.y) ? 0xf6e5ad : 0xc76852);
     this.selection.strokeRect(selectionTarget.x * TILE_SIZE, selectionTarget.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    const phase = dayPhaseAt(this.session.tick);
+    if (phase !== this.lastDayPhase) {
+      if (phase === "Crépuscule") this.callbacks.onAction("Crépuscule : préparez torches, atelier et défenses.");
+      if (phase === "Nuit") this.callbacks.onAction("Horde nocturne : les zombies apparaissent en surface.");
+      this.callbacks.onHud();
+      this.lastDayPhase = phase;
+    }
     this.hudElapsed += elapsed;
     if (this.hudElapsed >= 200) {
       this.callbacks.onHud();
       this.hudElapsed = 0;
+    }
+  }
+
+  private drawZombies(): void {
+    this.zombies.clear();
+    for (const zombie of this.session.zombies) {
+      this.zombies.fillStyle(0x456b4d);
+      this.zombies.fillRect(zombie.x + 2, zombie.y + 3, 8, 12);
+      this.zombies.fillRect(zombie.x, zombie.y + 13, 12, 10);
+      this.zombies.fillStyle(0x9ac46d);
+      this.zombies.fillRect(zombie.x + 3, zombie.y, 6, 5);
+      this.zombies.fillStyle(0x15251f);
+      this.zombies.fillRect(zombie.x + 3, zombie.y + 1, 2, 2);
+      this.zombies.fillRect(zombie.x + 7, zombie.y + 1, 2, 2);
+      this.zombies.fillStyle(0x6d8e64);
+      this.zombies.fillRect(zombie.x, zombie.y + 23, 4, 3);
+      this.zombies.fillRect(zombie.x + 8, zombie.y + 23, 4, 3);
+      this.zombies.fillStyle(0x301f1b, 0.85);
+      this.zombies.fillRect(zombie.x - 2, zombie.y - 5, 16, 3);
+      this.zombies.fillStyle(0xa5cb63);
+      this.zombies.fillRect(zombie.x - 2, zombie.y - 5, 16 * zombie.health / ZOMBIE_MAX_HEALTH, 3);
     }
   }
 

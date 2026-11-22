@@ -38,7 +38,15 @@ Première version jouable : couches de paysage et forêt en parallaxe, premier p
 
 **Premier outil livré :** pioche en pierre non empilable, non posable, déposée et ramassée avec sa durabilité propre. Elle mine les deux plans, inflige 2 dégâts par impact et possède 500 points d'usure, affichés sur son icône. Une recette de 1 bois + 1 pierre la produit en 3 secondes. La catégorie Outils est réutilisable; le schéma v8 conserve chaque exemplaire et migre les formats précédents.
 
-Le contenu artistique, les mesures sur appareils mobiles réels et la météo restent à approfondir. Ce catalogue n'est pas le système complet d'artisanat; les stations, PNJ, santé, combat et menaces nocturnes restent à réaliser.
+**Première progression de fabrication livrée :** établi, four et forge sont des stations placées et persistantes. Leurs recettes exigent une station à moins de quatre blocs au démarrage, puis les lots réservés continuent même si le joueur s'éloigne. Cuivre et fer peuvent être fondus avec du charbon en lingots; les pioches en cuivre (puissance 4, 800 usages) et fer (puissance 7, 1 200 usages) prolongent la progression minière. Une fabrication annulable restitue les lots entiers non terminés lorsque l'espace disponible le permet. Le schéma v11 ajoute stations, lingots et outils sans modifier les mondes précédents.
+
+## Tranche 03 — première nuit jouable
+
+Le cycle jour/nuit déclenche maintenant une horde nocturne plafonnée de zombies. Le joueur dispose de santé, de dégâts et de combat à mains nues ou aux pioches, avec priorité de cible et cadence partagée avec le minage. Une mort bloque temporairement les actions, dépose selon la difficulté 0 %, 25 % ou 100 % des objets transportés avec leur durabilité, puis réapparaît au point de départ avec protection courte.
+
+Les réglages Exploration, Standard et Périlleux sont choisis à la création et modifiables en partie. Le Mode créatif constitue une quatrième difficulté sans zombies, sans dégâts de combat ni perte, avec menu DEV automatique. Ils persistent avec la santé, les zombies et l'avancement de vague. Le schéma v12 migre les parties v1 à v11 avec santé complète, difficulté Standard et aucune horde active. Les squelettes, lits, PNJ, loot d'ennemis et armes spécialisées restent hors de cette tranche.
+
+Le contenu artistique, les mesures sur appareils mobiles réels et la météo restent à approfondir. Ce catalogue n'est pas le système complet d'artisanat.
 
 Les éléments ci-dessous restent les critères de sortie du **MVP complet**; une tranche implémentée ne signifie pas que l'ensemble de la ligne est terminé.
 
@@ -71,8 +79,8 @@ Livrer de petites tranches intégrées. Chaque tranche reste jouable et sauvegar
 | P0 | Blocs et inventaire | Terre/pierre/bois, destruction/placement validés, objets multi-cases et multi-matériaux, 24 piles, barre de 10 raccourcis et objets déposés |
 | P0 | Mode créatif / DEV | Option par partie désactivée par défaut, menu DEV conditionnel, ajout de ressources validé et sauvegardé |
 | P1 | Profondeur et lumière | Première version jouable : grottes v2, parallaxe, cycle, torches et occlusion avec qualité économique; enrichissement et profilage sur mobiles réels à poursuivre |
-| P1 | Construction et craft | Fabrication progressive de torches, échelles et escaliers disponible; abri de bois, établi/four/forge et autres recettes à réaliser |
-| P1 | Cycle, combat et première nuit | Quatre phases du jour, santé, respawn, zombies, vagues plafonnées, dégâts et difficulté ajustables |
+| P1 | Construction et craft | Fabrication progressive disponible; établi/four/forge, lingots de cuivre et de fer, pioches améliorées livrés; abri, conteneurs et autres recettes à réaliser |
+| P1 | Cycle, combat et première nuit | Quatre phases du jour, santé, respawn, zombies, vagues plafonnées, dégâts et difficulté ajustables livrés; équilibre, variantes et armes à approfondir |
 | P1 | PNJ et ordres | Rencontrer/recruter deux mineurs, affecter zone, extraire une ressource et visualiser blocage/annulation |
 | P1 | Progression minière | Charbon/cuivre/fer/or, découverte du fer et outils premiers niveaux; pioches et autres équipements augmentant l'efficacité du minage |
 | P1 | Robustesse mobile | Interface tactile responsive, zoom/pincement, contrôles configurables et test appareils réels |

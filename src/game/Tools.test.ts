@@ -194,7 +194,7 @@ describe("non-stackable tools and stone pickaxes", () => {
     save.hotbar[2] = null;
     const { tools: _tools, ...inventory } = save.inventory;
     const migrated = validateSave({ ...save, schemaVersion: 7, generatorVersion: 3, inventory });
-    expect(migrated.schemaVersion).toBe(10);
+    expect(migrated.schemaVersion).toBe(12);
     expect(migrated.inventory.tools).toEqual([]);
     expect(migrated.edits).toEqual(save.edits);
     expect(migrated.backgroundEdits).toEqual(save.backgroundEdits);

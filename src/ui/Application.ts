@@ -22,6 +22,8 @@ import {
 } from "../pwa/orientation";
 import { registerPwa } from "../pwa/registerPwa";
 import { createRoadmapDialog } from "./roadmap";
+import { DIFFICULTIES, DIFFICULTY_IDS, isDifficultyId } from "../survival/Difficulty";
+import { PLAYER_MAX_HEALTH } from "../survival/SurvivalState";
 
 type StackSource = SlotLocation & { stack: ItemStack };
 type TouchDrag = { pointerId: number; x: number; y: number; source: StackSource; moved: boolean };
@@ -137,6 +139,12 @@ export class Application {
               <label>Graine du monde <span>(facultative)</span>
                 <input id="world-seed" name="seed" maxlength="100" placeholder="Une graine, un même territoire">
               </label>
+              <label for="new-difficulty">Difficulté
+                <select id="new-difficulty" name="difficulty">
+                  ${DIFFICULTY_IDS.map((id) => `<option value="${id}"${id === "standard" ? " selected" : ""}>${DIFFICULTIES[id].label} · perte ${DIFFICULTIES[id].deathItemLossPercent} %</option>`).join("")}
+                </select>
+              </label>
+              <p id="new-difficulty-help" class="difficulty-help">${DIFFICULTIES.standard.description}</p>
               <label class="option-toggle"><input id="new-creative-mode" type="checkbox">
                 Mode créatif <span>(menu DEV de ressources)</span></label>
               <div class="button-row">
@@ -149,13 +157,19 @@ export class Application {
             <p class="storage-note">Un emplacement local · Sauvegarde automatique · Fichiers JSON<br>
               Vos parties restent sur cet appareil. Exportez-les pour les conserver ailleurs.</p>
           </section>
-          <footer class="menu-footer">Monde seedé, exploration, minage et lumière.
-            La colonie, l'artisanat complet et les menaces arrivent dans les prochaines tranches.</footer>
+          <footer class="menu-footer">Monde seedé, exploration, minage, lumière et première nuit dangereuse.
+            La colonie et l'artisanat complet arrivent dans les prochaines tranches.</footer>
         </div>
       </section>
       <section id="play-ui" hidden aria-label="Commandes de jeu">
         <header class="hud-bar" data-camera-edge="top">
-          <div class="hud-identity"><strong>Kingdoms Beneath</strong><span id="coordinates"></span></div>
+          <div class="hud-identity">
+            <strong>Kingdoms Beneath</strong>
+            <span id="coordinates"></span>
+            <span class="health-readout">Santé <progress id="player-health" max="${PLAYER_MAX_HEALTH}" value="${PLAYER_MAX_HEALTH}" aria-label="Santé du joueur"></progress>
+              <output id="player-health-value">${PLAYER_MAX_HEALTH}</output> / ${PLAYER_MAX_HEALTH}</span>
+            <span id="survival-status" class="survival-status" role="status"></span>
+          </div>
           <div class="hud-actions">
             <span id="save-state" role="status" data-camera-edge="top"></span>
             <button id="open-inventory" aria-expanded="false">Inventaire (I)</button>
@@ -167,7 +181,7 @@ export class Application {
           </div>
         </header>
         <p id="play-help" class="play-help" data-camera-edge="top" hidden>A/Q/D ou flèches : déplacement · Espace : saut · W/Z/S ou ↑/↓ : échelle / nage · Maj : course · Maintenir une plante : cueillir ·
-          Raccourci vide ou outil : maintenir le clic pour miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
+          Raccourci vide ou outil : maintenir le clic sur un zombie ou un bloc pour attaquer/miner (impact toutes les 0,25 s) · Matériau sélectionné : cliquer pour poser ·
           Carrés superposés : choisir le plan · 1–0 : sélection · I : inventaire · G : déposer · Échap : pause<br>
           Tactile : maintenez une case pour miner, touchez-la pour poser. Pincez pour zoomer.</p>
         <section id="inventory-panel" class="inventory-panel" hidden aria-labelledby="inventory-title">
@@ -186,6 +200,7 @@ export class Application {
             </div>
             <aside class="craft-panel" aria-labelledby="craft-title">
               <h3 id="craft-title">Recettes connues</h3>
+              <p class="craft-stations">Les stations se fabriquent puis se posent. Restez à moins de quatre blocs de la station requise pour lancer sa recette.</p>
               <label for="recipe-list">Recette</label>
               <select id="recipe-list" size="${RECIPE_IDS.length + 2}">
                 ${[false, true].map((tools) => `<optgroup label="${tools ? "Outils" : "Construction"}">
@@ -198,6 +213,8 @@ export class Application {
                 <span id="craft-quantity-max">Max 98</span></label>
               <input id="craft-quantity" type="range" min="2" max="98" step="2" value="2">
               <button id="craft-start" class="primary" type="button">Fabriquer</button>
+              <button id="craft-cancel" type="button" disabled>Annuler la fabrication</button>
+              <p class="craft-cancel-help">Les lots entiers non terminés sont remboursés si le rangement le permet. Un lot déjà partiellement produit est consommé.</p>
               <div class="craft-progress">
                 <progress id="craft-item-progress" aria-label="Objet en cours" max="1" value="0"></progress>
                 <progress id="craft-total-progress" aria-label="Fabrication totale" max="1" value="0"></progress>
@@ -266,6 +283,12 @@ export class Application {
             </label>
             <p>Le mode économique réduit le coût du rendu sans modifier l'occlusion.</p>
             <p id="lighting-notice" class="notice" role="status"></p>
+            <label class="lighting-option" for="game-difficulty">Difficulté
+              <select id="game-difficulty" data-operation>
+                ${DIFFICULTY_IDS.map((id) => `<option value="${id}">${DIFFICULTIES[id].label}</option>`).join("")}
+              </select>
+            </label>
+            <p id="game-difficulty-help" class="difficulty-help"></p>
           </fieldset>
           <fieldset class="game-options">
             <legend>Affichage de cet appareil</legend>
@@ -354,6 +377,15 @@ export class Application {
       this.element("new-game-form").hidden = true;
       this.element("new-game").focus();
     });
+    this.element("new-difficulty").addEventListener("change", (event) => {
+      if (!(event.target instanceof HTMLSelectElement) || !isDifficultyId(event.target.value)) return;
+      this.element("new-difficulty-help").textContent = DIFFICULTIES[event.target.value].description;
+      const creative = this.element("new-creative-mode");
+      if (creative instanceof HTMLInputElement) {
+        creative.disabled = event.target.value === "creative";
+        if (creative.disabled) creative.checked = true;
+      }
+    });
     this.element("new-game-form").addEventListener("submit", (event) => {
       event.preventDefault();
       void this.run(async () => {
@@ -362,9 +394,15 @@ export class Application {
         if (!name) throw new Error("Donnez un nom à votre partie.");
         if (!(await this.confirmReplacement())) return;
         const session = GameSession.create(name, seed);
+        const difficulty = this.element("new-difficulty");
+        if (difficulty instanceof HTMLSelectElement && isDifficultyId(difficulty.value)) {
+          session.setDifficulty(difficulty.value);
+        }
         session.lightingQuality = window.matchMedia("(pointer: coarse)").matches ? "reduced" : "standard";
         const creative = this.element("new-creative-mode");
-        if (creative instanceof HTMLInputElement) session.setCreativeMode(creative.checked);
+        if (creative instanceof HTMLInputElement && session.difficulty !== "creative") {
+          session.setCreativeMode(creative.checked);
+        }
         const save = session.snapshot();
         await this.repository.write(save);
         this.saved = save;
@@ -434,6 +472,17 @@ export class Application {
       }
       this.session.lightingQuality = event.target.value;
       this.element("lighting-notice").textContent = "Qualité d'éclairage mise à jour pour cette partie.";
+    });
+    this.element("game-difficulty").addEventListener("change", (event) => {
+      if (!this.session || !(event.target instanceof HTMLSelectElement) ||
+          !isDifficultyId(event.target.value)) return;
+      const result = this.session.setDifficulty(event.target.value);
+      if (!result.ok) {
+        this.element("game-difficulty-help").textContent = result.reason;
+        return;
+      }
+      this.element("game-difficulty-help").textContent = DIFFICULTIES[event.target.value].description;
+      this.updateHud();
     });
     this.element("dev-gallery").addEventListener("click", (event) => {
       const button = event.target instanceof Element
@@ -506,6 +555,18 @@ export class Application {
       if (result.ok) {
         this.finishedCraft = null;
         this.lastCraft = { recipeId: recipe.value, quantity: quantity.valueAsNumber };
+      }
+      this.updateHud();
+    });
+    this.element("craft-cancel").addEventListener("click", () => {
+      if (!this.session) return;
+      const result = this.session.cancelCraft();
+      this.element("craft-notice").textContent = result.ok
+        ? "Fabrication annulée : les lots non commencés ont été restitués."
+        : result.reason;
+      if (result.ok) {
+        this.lastCraft = null;
+        this.finishedCraft = null;
       }
       this.updateHud();
     });
@@ -1101,12 +1162,21 @@ export class Application {
     const list = this.element("recipe-list");
     const quantity = this.element("craft-quantity");
     const button = this.element("craft-start");
+    const cancelButton = this.element("craft-cancel");
     const itemProgress = this.element("craft-item-progress");
     const totalProgress = this.element("craft-total-progress");
     if (!(list instanceof HTMLSelectElement) || !(quantity instanceof HTMLInputElement) ||
-        !(button instanceof HTMLButtonElement) || !(itemProgress instanceof HTMLProgressElement) ||
+        !(button instanceof HTMLButtonElement) || !(cancelButton instanceof HTMLButtonElement) ||
+        !(itemProgress instanceof HTMLProgressElement) ||
         !(totalProgress instanceof HTMLProgressElement)) throw new Error("Contrôles de fabrication invalides.");
     const job = session.crafting;
+    for (const option of Array.from(list.options)) {
+      if (!isRecipeId(option.value)) continue;
+      const station = RECIPES[option.value].station;
+      option.disabled = !job && station !== null && !session.canCraft(option.value);
+      option.textContent = `${ITEM_LABELS[RECIPES[option.value].output]} × ${RECIPES[option.value].outputPerRecipe}${
+        station ? ` · ${ITEM_LABELS[station]}` : ""}`;
+    }
     if (job) {
       list.value = job.recipeId;
       this.lastCraft = { recipeId: job.recipeId, quantity: job.quantity };
@@ -1120,8 +1190,10 @@ export class Application {
     }
     if (!isRecipeId(list.value)) throw new Error("Recette sélectionnée invalide.");
     const recipe = RECIPES[list.value];
-    const craftable = job ? job.quantity
-      : clampCraftQuantity(recipe, MAX_CRAFT_SELECTION, (itemId) => session.totalItems(itemId));
+    const stationAvailable = job !== null || session.canCraft(recipe.id);
+    const craftable = job ? job.quantity : stationAvailable
+      ? clampCraftQuantity(recipe, MAX_CRAFT_SELECTION, (itemId) => session.totalItems(itemId))
+      : 0;
     const maximum = Math.floor(MAX_CRAFT_SELECTION / recipe.outputPerRecipe) * recipe.outputPerRecipe;
     quantity.min = String(craftable === 0 ? 0 : recipe.outputPerRecipe);
     quantity.max = String(job ? Math.max(maximum, job.quantity) : maximum);
@@ -1133,6 +1205,11 @@ export class Application {
     list.disabled = !!job;
     quantity.disabled = !!job || craftable === 0;
     button.disabled = !!job || craftable === 0;
+    cancelButton.disabled = !job;
+    if (!stationAvailable && recipe.station) {
+      this.element("craft-notice").textContent =
+        `Station requise : approchez-vous d'un ${ITEM_LABELS[recipe.station]} posé dans le monde.`;
+    }
     if (job) {
       itemProgress.max = recipe.ticksPerItem;
       itemProgress.value = job.progressTicks;
@@ -1221,9 +1298,27 @@ export class Application {
     const { player, world, inventory, selectedSlot, hotbar } = this.session;
     this.element("open-dev").hidden = !this.session.creativeMode;
     const creative = this.element("creative-mode");
-    if (creative instanceof HTMLInputElement) creative.checked = this.session.creativeMode;
+    if (creative instanceof HTMLInputElement) {
+      creative.checked = this.session.creativeMode;
+      creative.disabled = this.session.difficulty === "creative";
+    }
     const lighting = this.element("lighting-quality");
     if (lighting instanceof HTMLSelectElement) lighting.value = this.session.lightingQuality;
+    const difficulty = this.element("game-difficulty");
+    if (difficulty instanceof HTMLSelectElement) difficulty.value = this.session.difficulty;
+    this.element("game-difficulty-help").textContent = DIFFICULTIES[this.session.difficulty].description;
+    const health = this.element("player-health");
+    if (health instanceof HTMLProgressElement) health.value = this.session.survival.health;
+    this.element("player-health-value").textContent = String(this.session.survival.health);
+    const survivalStatus = this.element("survival-status");
+    if (this.session.survival.dead) {
+      const seconds = Math.max(1, Math.ceil(this.session.survival.respawnTicks / 60));
+      survivalStatus.textContent = `Vous êtes à terre · réapparition dans ${seconds} s`;
+    } else if (this.session.survival.invulnerabilityTicks > 0) {
+      survivalStatus.textContent = "Protection de réapparition active";
+    } else {
+      survivalStatus.textContent = `${this.session.zombies.length} menace${this.session.zombies.length === 1 ? "" : "s"} active${this.session.zombies.length === 1 ? "" : "s"}`;
+    }
     if (!this.session.creativeMode && !this.element("dev-panel").hidden) this.toggleDev(false);
     this.element("coordinates").textContent = `${world.generator.biomeAt(Math.floor(player.x / TILE_SIZE)) === "forest" ? "Forêt" : "Plaine"} · ${dayPhaseAt(this.session.tick)} · x ${Math.floor(player.x / TILE_SIZE)} · y ${Math.floor(player.y / TILE_SIZE)}`;
     const inventoryOpen = this.inventoryIsOpen();

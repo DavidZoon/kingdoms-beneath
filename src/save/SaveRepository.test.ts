@@ -60,7 +60,7 @@ describe("IndexedDB save slot", () => {
     database.close();
     const migrated = await repository.read();
     expect(migrated).toMatchObject({
-      schemaVersion: 10, generatorVersion: 2, creativeMode: true,
+      schemaVersion: 12, generatorVersion: 2, creativeMode: true,
       blockDamage: save.blockDamage, edits: save.edits,
       selectedSlot: 2, lightingQuality: "standard",
     });

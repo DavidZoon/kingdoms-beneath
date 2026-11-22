@@ -83,6 +83,32 @@ export function drawBlockTexture(ctx: CanvasRenderingContext2D, block: BlockId, 
     ctx.fillStyle = "#96C8EF";
     ctx.fillRect(x + 3, 6, 12, 2);
     ctx.fillRect(x + 18, 22, 10, 2);
+  } else if (block === Block.Workbench) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.fillStyle = "#70482f";
+    ctx.fillRect(x + 4, 9, 24, 5);
+    ctx.fillRect(x + 6, 14, 4, 16);
+    ctx.fillRect(x + 22, 14, 4, 16);
+    ctx.fillStyle = "#bf8550";
+    ctx.fillRect(x + 2, 6, 28, 5);
+    ctx.fillStyle = "#d5aa69";
+    ctx.fillRect(x + 8, 1, 3, 5);
+    ctx.fillRect(x + 15, 2, 8, 2);
+  } else if (block === Block.Furnace || block === Block.Forge) {
+    ctx.clearRect(x, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+    ctx.fillStyle = block === Block.Furnace ? "#75665d" : "#555c5f";
+    ctx.fillRect(x + 3, 4, 26, 28);
+    ctx.fillStyle = block === Block.Furnace ? "#a18a76" : "#7c8588";
+    for (let py = 5; py < 30; py += 6) {
+      ctx.fillRect(x + 5, py, 9, 2);
+      ctx.fillRect(x + 18, py + 3, 9, 2);
+    }
+    ctx.fillStyle = "#222b2e";
+    ctx.fillRect(x + 10, 14, 12, 14);
+    ctx.fillStyle = "#e77832";
+    ctx.fillRect(x + 13, 20, 6, 8);
+    ctx.fillStyle = "#ffd369";
+    ctx.fillRect(x + 15, 22, 2, 4);
   } else {
     ctx.fillStyle = "#ffffff";
     ctx.globalAlpha = 0.25;
@@ -101,6 +127,15 @@ export function drawItemTexture(ctx: CanvasRenderingContext2D, item: MaterialIte
     return;
   }
   ctx.clearRect(0, 0, TILE_ART_SIZE, TILE_ART_SIZE);
+  if (item === "copper_ingot" || item === "iron_ingot") {
+    ctx.fillStyle = item === "copper_ingot" ? "#b87333" : "#a5a9a7";
+    ctx.fillRect(5, 10, 22, 14);
+    ctx.fillStyle = item === "copper_ingot" ? "#dd9b5c" : "#d2d6d4";
+    ctx.fillRect(7, 10, 14, 5);
+    ctx.fillStyle = "#5b554e";
+    ctx.fillRect(5, 22, 22, 2);
+    return;
+  }
   ctx.fillStyle = RESOURCES[item].color;
   if (item.endsWith("_plant") || ["vine", "tall_grass", "reed", "wild_berry", "herb_mint", "lavender", "aloe"].includes(item)) {
     ctx.fillRect(14, 10, 4, 22);
